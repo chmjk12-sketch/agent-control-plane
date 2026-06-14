@@ -8,7 +8,7 @@ on:
 env:
   APP_NAME: agent-control-plane
   APP_PORT: "3004"
-  REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+  REGISTRY: crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com
   REGISTRY_NAMESPACE: chmjk67
   DOMAIN: chmjk67.top
   ECS_IP: 39.105.86.184
@@ -21,7 +21,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY_URL }}
+          registry: ${{ env.REGISTRY }}
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
@@ -30,8 +30,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
-            ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
 
       # Step A: 尝试 SSH 部署
       - name: Deploy via SSH
@@ -46,7 +46,7 @@ jobs:
           script: |
             /opt/app/scripts/deploy.sh \
               --app-name ${{ env.APP_NAME }} \
-              --image ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }} \
+              --image ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }} \
               --port ${{ env.APP_PORT }} \
               --internal-port 3000 \
               --health-path /api/overview
@@ -58,8 +58,8 @@ jobs:
           python3 -c "
           import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
           from datetime import datetime, timezone, time
-          AK_ID='\${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
-          AK_SECRET='\${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
+          AK_ID='${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
+          AK_SECRET='${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
           def sign(p):
               sp=sorted(p.items()); Q=urllib.parse.quote
               q='&'.join(Q(k,'')+'='+Q(v,'') for k,v in sp)
@@ -81,11 +81,17 @@ jobs:
                           print(base64.b64decode(o).decode('utf-8','replace') if o else res['InvocationStatus'])
                           return
           instance_id='i-2zeee6djmc1qhwptmz1l'
-          deploy_cmd=f'''docker login --username=\${{ secrets.REGISTRY_USERNAME }} --password=\${{ secrets.REGISTRY_PASSWORD }} \${{ env.REGISTRY_URL }}
-          docker pull \${{ env.REGISTRY_URL }}/\${{ env.REGISTRY_NAMESPACE }}/\${{ env.APP_NAME }}:latest
-          docker stop \${{ env.APP_NAME }}_app 2>/dev/null; docker rm \${{ env.APP_NAME }}_app 2>/dev/null
-          docker run -d --name \${{ env.APP_NAME }}_app -p \${{ env.APP_PORT }}:3000 --restart always --network caddy-net \${{ env.REGISTRY_URL }}/\${{ env.REGISTRY_NAMESPACE }}/\${{ env.APP_NAME }}:latest
-          sleep 5; curl -sf http://127.0.0.1:\${{ env.APP_PORT }}/api/overview && echo HEALTH_OK || echo HEALTH_FAIL'''
+          REGISTRY='${{ env.REGISTRY }}'
+          NAMESPACE='${{ env.REGISTRY_NAMESPACE }}'
+          APP_NAME='${{ env.APP_NAME }}'
+          APP_PORT='${{ env.APP_PORT }}'
+          REG_USER='${{ secrets.REGISTRY_USERNAME }}'
+          REG_PASS='${{ secrets.REGISTRY_PASSWORD }}'
+          deploy_cmd=f'''docker login --username={REG_USER} --password={REG_PASS} {REGISTRY}
+          docker pull {REGISTRY}/{NAMESPACE}/{APP_NAME}:latest
+          docker stop {APP_NAME}_app 2>/dev/null; docker rm {APP_NAME}_app 2>/dev/null
+          docker run -d --name {APP_NAME}_app -p {APP_PORT}:3000 --restart always --network caddy-net {REGISTRY}/{NAMESPACE}/{APP_NAME}:latest
+          sleep 5; curl -sf http://127.0.0.1:{APP_PORT}/api/overview && echo HEALTH_OK || echo HEALTH_FAIL'''
           run_cmd(instance_id, deploy_cmd)
           "
 
@@ -95,8 +101,8 @@ jobs:
           python3 -c "
           import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid, time
           from datetime import datetime, timezone
-          AK_ID='\${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
-          AK_SECRET='\${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
+          AK_ID='${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
+          AK_SECRET='${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
           def sign(p):
               sp=sorted(p.items()); Q=urllib.parse.quote
               q='&'.join(Q(k,'')+'='+Q(v,'') for k,v in sp)
@@ -141,15 +147,15 @@ jobs:
           python3 -c "
           import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
           from datetime import datetime, timezone
-          AK_ID='\${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
-          AK_SECRET='\${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
+          AK_ID='${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
+          AK_SECRET='${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
           def sign(p):
               sp=sorted(p.items()); Q=urllib.parse.quote
               q='&'.join(Q(k,'')+'='+Q(v,'') for k,v in sp)
               s='GET&'+Q('/','')+'&'+Q(q,'')
               sig=base64.b64encode(hmac.new((AK_SECRET+'&').encode(),s.encode(),hashlib.sha1).digest()).decode()
               return q+'&Signature='+Q(sig,'')
-          p={'Action':'AddDomainRecord','DomainName':'\${{ env.DOMAIN }}','RR':'administrator','Type':'A','Value':'\${{ env.ECS_IP }}','Format':'JSON','Version':'2015-01-09','AccessKeyId':AK_ID,'SignatureMethod':'HMAC-SHA1','SignatureVersion':'1.0','Timestamp':datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),'SignatureNonce':str(uuid.uuid4())}
+          p={'Action':'AddDomainRecord','DomainName':'${{ env.DOMAIN }}','RR':'administrator','Type':'A','Value':'${{ env.ECS_IP }}','Format':'JSON','Version':'2015-01-09','AccessKeyId':AK_ID,'SignatureMethod':'HMAC-SHA1','SignatureVersion':'1.0','Timestamp':datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),'SignatureNonce':str(uuid.uuid4())}
           try:
               r=urllib.request.urlopen('https://dns.aliyuncs.com/?'+sign(p),timeout=10)
               d=json.loads(r.read())
@@ -157,5 +163,5 @@ jobs:
               else: print('DNS may already exist or error:', d)
           except Exception as e:
               print('DNS API error:', e)
-              print('Please manually add A record: administrator -> \${{ env.ECS_IP }}')
+              print('Please manually add A record: administrator -> ${{ env.ECS_IP }}')
           "
