@@ -33,8 +33,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
 
-      # 部署：通过 RunCommand 调用服务器上的 deploy-cp.sh
-      # 首次运行时会自动上传脚本到服务器
+      # 部署：分步通过 RunCommand 执行，每步可见输出
       - name: Deploy to server
         run: |
           python3 << 'PYEOF'
@@ -86,24 +85,86 @@ jobs:
                   for res in json.loads(r2.read()).get('Invocation', {}).get('InvocationResults', {}).get('InvocationResult', []):
                       if res.get('InvocationStatus') in ('Success', 'Failed', 'Finished'):
                           o = res.get('Output', '') or ''
-                          print(base64.b64decode(o).decode('utf-8', 'replace') if o else res['InvocationStatus'])
-                          return
+                          return base64.b64decode(o).decode('utf-8', 'replace') if o else res['InvocationStatus']
+              return 'TIMEOUT'
 
-          # 读取脚本并用 base64 编码传递（避免 heredoc 转义问题）
-          with open('scripts/deploy-cp.sh', 'r') as f:
-              script_b64 = base64.b64encode(f.read().encode()).decode()
+          IMAGE = REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':${{ github.sha }}'
 
-          IMAGE = REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':' + '${{ github.sha }}'
+          # Step 1: 确保 Docker 网络
+          print("=== [1/7] 确保 Docker 网络 caddy-net ===")
+          out = run_cmd('docker network create caddy-net 2>/dev/null; docker network ls | grep caddy-net', 60)
+          print(out)
 
-          # 部署命令：base64 解码写入脚本 + 执行
-          deploy_cmd = 'set -e && ' \
-              'mkdir -p /opt/app/scripts && ' \
-              'echo "' + script_b64 + '" | base64 -d > /opt/app/scripts/deploy-cp.sh && ' \
-              'chmod +x /opt/app/scripts/deploy-cp.sh && ' \
-              '/opt/app/scripts/deploy-cp.sh ' + IMAGE
+          # Step 2: Docker login
+          print("=== [2/7] Docker login ===")
+          out = run_cmd('echo "' + REG_PASS + '" | docker login ' + REGISTRY + ' -u "' + REG_USER + '" --password-stdin 2>&1', 60)
+          print(out)
 
-          print("=== 开始部署 ===")
-          run_cmd(deploy_cmd, timeout=300)
+          # Step 3: 启动 PostgreSQL
+          print("=== [3/7] 确保 PostgreSQL 运行 ===")
+          pg_cmd = (
+              'if ! docker ps --format "{{.Names}}" | grep -q "^cp-postgres$"; then '
+              'docker rm -f cp-postgres 2>/dev/null; '
+              'docker run -d --name cp-postgres --restart always --network caddy-net '
+              '-e POSTGRES_USER=cp_admin -e POSTGRES_PASSWORD=cp_admin_2024_secure '
+              '-e POSTGRES_DB=agent_control_plane -v cp-postgres-data:/var/lib/postgresql/data '
+              'postgres:16-alpine; '
+              'echo "Waiting PG..."; '
+              'for i in $(seq 1 30); do docker exec cp-postgres pg_isready -U cp_admin >/dev/null 2>&1 && break; sleep 1; done; '
+              'echo "PG_READY"; '
+              'else echo "PG_ALREADY_RUNNING"; fi'
+          )
+          out = run_cmd(pg_cmd, 120)
+          print(out)
+
+          # Step 4: 拉取镜像
+          print("=== [4/7] 拉取镜像: " + IMAGE + " ===")
+          out = run_cmd('docker pull ' + IMAGE, 180)
+          print(out)
+
+          # Step 5: 部署容器
+          print("=== [5/7] 部署容器 ===")
+          deploy_cmd = (
+              'docker stop agent-control-plane_app 2>/dev/null; '
+              'docker rm agent-control-plane_app 2>/dev/null; '
+              'docker run -d --name agent-control-plane_app '
+              '-p 3000:3000 --restart always --network caddy-net '
+              '-e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public" '
+              '-e NODE_ENV=production '
+              '-e SELF_URL="https://administrator.chmjk67.top" '
+              + IMAGE
+          )
+          out = run_cmd(deploy_cmd, 60)
+          print(out)
+
+          # Step 6: 数据库迁移
+          print("=== [6/7] 数据库迁移 ===")
+          time.sleep(10)
+          out = run_cmd('docker exec agent-control-plane_app npx prisma migrate deploy --skip-generate 2>&1 || echo "MIGRATE_SKIPPED"', 120)
+          print(out)
+
+          # Step 7: 健康检查 + Caddy 更新
+          print("=== [7/7] 健康检查 + Caddy ===")
+          health_cmd = (
+              'sleep 5; '
+              'curl -sf http://127.0.0.1:3000/api/overview && echo "HEALTH_OK" || echo "HEALTH_FAIL"; '
+              'if [ -f /opt/app/Caddyfile ]; then '
+              '  if grep -q "administrator.chmjk67.top" /opt/app/Caddyfile; then '
+              '    sed -i "/administrator\\.chmjk67\\.top/,/}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|" /opt/app/Caddyfile; '
+              '  else '
+              '    echo "" >> /opt/app/Caddyfile; '
+              '    echo "administrator.chmjk67.top {" >> /opt/app/Caddyfile; '
+              '    echo "    reverse_proxy agent-control-plane_app:3000" >> /opt/app/Caddyfile; '
+              '    echo "}" >> /opt/app/Caddyfile; '
+              '  fi; '
+              '  docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true; '
+              '  echo "CADDY_UPDATED"; '
+              'else echo "CADDYFILE_NOT_FOUND"; fi'
+          )
+          out = run_cmd(health_cmd, 60)
+          print(out)
+
+          print("=== 部署流程完成 ===")
           PYEOF
 
       - name: Ensure DNS A record
