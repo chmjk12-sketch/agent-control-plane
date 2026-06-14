@@ -9,7 +9,7 @@ export function CostChart({ data }: { data: DailyCost[] }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">Daily Cost Trend</CardTitle>
+        <CardTitle className="text-sm font-medium">成本趋势</CardTitle>
         <BarChart3 className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>

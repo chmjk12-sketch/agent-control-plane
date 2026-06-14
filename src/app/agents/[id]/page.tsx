@@ -11,9 +11,9 @@ import { Bot, ArrowLeft, GitBranch, Tag, Cpu, Wrench, Rocket, Play } from "lucid
 import { formatCost, formatTokens, formatLatency, timeAgo, formatUptime, formatMemory } from "@/lib/utils";
 
 const statusConfig: Record<string, { color: "success" | "destructive" | "warning"; label: string }> = {
-  running: { color: "success", label: "Running" },
-  offline: { color: "destructive", label: "Offline" },
-  degraded: { color: "warning", label: "Degraded" },
+  running: { color: "success", label: "运行中" },
+  offline: { color: "destructive", label: "离线" },
+  degraded: { color: "warning", label: "降级" },
 };
 
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -60,20 +60,20 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
       {health && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Uptime</p><p className="text-lg font-bold">{formatUptime(health.uptime)}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Memory</p><p className="text-lg font-bold">{formatMemory(health.memoryMb)}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">运行时间</p><p className="text-lg font-bold">{formatUptime(health.uptime)}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">内存</p><p className="text-lg font-bold">{formatMemory(health.memoryMb)}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">CPU</p><p className="text-lg font-bold">{health.cpuPercent.toFixed(1)}%</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Restarts</p><p className="text-lg font-bold">{health.restartCount}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Last Heartbeat</p><p className="text-lg font-bold">{health.lastHeartbeat ? timeAgo(health.lastHeartbeat) : "N/A"}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">重启次数</p><p className="text-lg font-bold">{health.restartCount}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">最后心跳</p><p className="text-lg font-bold">{health.lastHeartbeat ? timeAgo(health.lastHeartbeat) : "N/A"}</p></CardContent></Card>
         </div>
       )}
 
       <Tabs defaultValue="versions">
         <TabsList>
-          <TabsTrigger value="versions"><Tag className="h-3.5 w-3.5 mr-1.5" />Versions</TabsTrigger>
-          <TabsTrigger value="deployments"><Rocket className="h-3.5 w-3.5 mr-1.5" />Deployments</TabsTrigger>
-          <TabsTrigger value="executions"><Play className="h-3.5 w-3.5 mr-1.5" />Executions</TabsTrigger>
-          <TabsTrigger value="config"><Wrench className="h-3.5 w-3.5 mr-1.5" />Config</TabsTrigger>
+          <TabsTrigger value="versions"><Tag className="h-3.5 w-3.5 mr-1.5" />版本</TabsTrigger>
+          <TabsTrigger value="deployments"><Rocket className="h-3.5 w-3.5 mr-1.5" />部署</TabsTrigger>
+          <TabsTrigger value="executions"><Play className="h-3.5 w-3.5 mr-1.5" />执行记录</TabsTrigger>
+          <TabsTrigger value="config"><Wrench className="h-3.5 w-3.5 mr-1.5" />配置</TabsTrigger>
         </TabsList>
 
         <TabsContent value="versions" className="space-y-3 mt-4">
@@ -84,7 +84,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                   <div className="p-2 rounded-lg bg-secondary/50"><Tag className="h-4 w-4 text-primary" /></div>
                   <div>
                     <p className="font-medium text-sm">{v.versionTag}</p>
-                    <p className="text-xs text-muted-foreground">{v.changelog || "No changelog"}</p>
+                    <p className="text-xs text-muted-foreground">{v.changelog || "暂无变更日志"}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-6 text-xs text-muted-foreground">
@@ -96,7 +96,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               </CardContent>
             </Card>
           ))}
-          {versions.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No versions yet</p>}
+          {versions.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">暂无版本</p>}
         </TabsContent>
 
         <TabsContent value="deployments" className="space-y-3 mt-4">
@@ -106,7 +106,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                 <div className="flex items-center gap-4">
                   <div className="p-2 rounded-lg bg-secondary/50"><Rocket className="h-4 w-4" /></div>
                   <div>
-                    <p className="font-medium text-sm">{d.version?.versionTag || "Unknown"}</p>
+                    <p className="font-medium text-sm">{d.version?.versionTag || "未知"}</p>
                     <p className="text-xs text-muted-foreground">{d.gitCommit?.slice(0, 7)} · {d.imageTag || "N/A"}</p>
                   </div>
                 </div>
@@ -125,12 +125,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Request ID</th>
-                    <th className="p-3 font-medium">Tokens</th>
-                    <th className="p-3 font-medium">Cost</th>
-                    <th className="p-3 font-medium">Latency</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium">Time</th>
+                    <th className="p-3 font-medium">请求 ID</th>
+                    <th className="p-3 font-medium">Token</th>
+                    <th className="p-3 font-medium">成本</th>
+                    <th className="p-3 font-medium">延迟</th>
+                    <th className="p-3 font-medium">状态</th>
+                    <th className="p-3 font-medium">时间</th>
                   </tr></thead>
                   <tbody>
                     {agent.recentExecutions?.map((e: any) => (
@@ -153,29 +153,29 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         <TabsContent value="config" className="mt-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
-              <CardHeader><CardTitle className="text-sm">Agent Info</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-sm">智能体信息</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Model</span><span>{agent.model}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">模型</span><span>{agent.model}</span></div>
                 <Separator />
-                <div className="flex justify-between"><span className="text-muted-foreground">Endpoint</span><span className="font-mono text-xs">{agent.endpoint || "N/A"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">端点</span><span className="font-mono text-xs">{agent.endpoint || "N/A"}</span></div>
                 <Separator />
-                <div className="flex justify-between"><span className="text-muted-foreground">Status</span><Badge variant={healthStatus.color}>{healthStatus.label}</Badge></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">状态</span><Badge variant={healthStatus.color}>{healthStatus.label}</Badge></div>
                 <Separator />
-                <div className="flex justify-between"><span className="text-muted-foreground">Tags</span><div className="flex gap-1">{agent.tags?.map((t: string) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}</div></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">标签</span><div className="flex gap-1">{agent.tags?.map((t: string) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}</div></div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle className="text-sm">Latest Version Config</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-sm">最新版本配置</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 {versions[0] && (
                   <>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Code Ref</span><span className="font-mono text-xs">{versions[0].codeRef || "N/A"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">代码引用</span><span className="font-mono text-xs">{versions[0].codeRef || "N/A"}</span></div>
                     <Separator />
-                    <div className="flex justify-between"><span className="text-muted-foreground">Prompt Ref</span><span className="font-mono text-xs">{versions[0].promptRef?.slice(0, 16) || "N/A"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">提示词引用</span><span className="font-mono text-xs">{versions[0].promptRef?.slice(0, 16) || "N/A"}</span></div>
                     <Separator />
-                    <div className="flex justify-between"><span className="text-muted-foreground">Image</span><span className="font-mono text-xs">{versions[0].imageTag || "N/A"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">镜像</span><span className="font-mono text-xs">{versions[0].imageTag || "N/A"}</span></div>
                     <Separator />
-                    <div className="flex justify-between"><span className="text-muted-foreground">Git Commit</span><span className="font-mono text-xs">{versions[0].gitCommit || "N/A"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Git 提交</span><span className="font-mono text-xs">{versions[0].gitCommit || "N/A"}</span></div>
                   </>
                 )}
               </CardContent>

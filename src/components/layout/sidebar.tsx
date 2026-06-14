@@ -11,22 +11,22 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 
 const mainNav = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/executions", label: "Executions", icon: Play },
-  { href: "/deployments", label: "Deployments", icon: Rocket },
+  { href: "/overview", label: "概览", icon: LayoutDashboard },
+  { href: "/agents", label: "智能体", icon: Bot },
+  { href: "/executions", label: "执行记录", icon: Play },
+  { href: "/deployments", label: "部署管理", icon: Rocket },
 ];
 
 const secondaryNav = [
-  { href: "/health", label: "Health", icon: Heart },
-  { href: "/costs", label: "Costs", icon: DollarSign },
-  { href: "/alerts", label: "Alerts", icon: Bell },
+  { href: "/health", label: "健康监控", icon: Heart },
+  { href: "/costs", label: "成本分析", icon: DollarSign },
+  { href: "/alerts", label: "告警中心", icon: Bell },
 ];
 
 const reservedNav = [
-  { href: "/evaluations", label: "Evaluations", icon: TestTube },
-  { href: "/experiments", label: "Experiments", icon: FlaskConical },
-  { href: "/workflows", label: "Workflows", icon: GitBranch },
+  { href: "/evaluations", label: "评估中心", icon: TestTube },
+  { href: "/experiments", label: "实验中心", icon: FlaskConical },
+  { href: "/workflows", label: "工作流", icon: GitBranch },
 ];
 
 export function Sidebar() {
@@ -49,7 +49,14 @@ export function Sidebar() {
       </div>
     );
 
-    if (disabled) return <div key={href}>{content}</div>;
+    if (disabled) return (
+      <Tooltip key={href}>
+        <TooltipTrigger asChild>
+          <div key={href}>{content}</div>
+        </TooltipTrigger>
+        <TooltipContent side="right">即将上线</TooltipContent>
+      </Tooltip>
+    );
 
     const link = (
       <Link href={href} key={href}>
@@ -80,7 +87,7 @@ export function Sidebar() {
               <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
                 <Box className="h-4 w-4 text-primary-foreground" />
               </div>
-              <span className="font-semibold text-sm tracking-tight">Control Plane</span>
+              <span className="font-semibold text-sm tracking-tight">智能体控制台</span>
             </Link>
           ) : (
             <Link href="/overview" className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
@@ -96,21 +103,21 @@ export function Sidebar() {
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
           <div className="space-y-1">
-            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">Main</p>}
+            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">主导航</p>}
             {mainNav.map((item) => <NavItem key={item.href} {...item} />)}
           </div>
           <div className="space-y-1">
-            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">Monitoring</p>}
+            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">监控中心</p>}
             {secondaryNav.map((item) => <NavItem key={item.href} {...item} />)}
           </div>
           <div className="space-y-1">
-            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">Advanced</p>}
+            {!sidebarCollapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50 mb-2">高级功能</p>}
             {reservedNav.map((item) => <NavItem key={item.href} {...item} disabled />)}
           </div>
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
-          <NavItem href="/settings" label="Settings" icon={Settings} />
+          <NavItem href="/settings" label="系统设置" icon={Settings} />
         </div>
 
         {sidebarCollapsed && (

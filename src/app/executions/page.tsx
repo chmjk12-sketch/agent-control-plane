@@ -30,22 +30,22 @@ export default function ExecutionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Executions</h1>
-        <p className="text-sm text-muted-foreground mt-1">Track all agent execution records</p>
+        <h1 className="text-2xl font-bold tracking-tight">执行记录</h1>
+        <p className="text-sm text-muted-foreground mt-1">追踪所有智能体执行记录</p>
       </div>
 
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search by request ID or agent name..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
+          <Input placeholder="搜索请求 ID 或智能体名称..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
         </div>
         <Select value={statusFilter || "all"} onValueChange={(v) => { setStatusFilter(v === "all" ? "" : v); setPage(1); }}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+          <SelectTrigger className="w-[140px]"><SelectValue placeholder="全部状态" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="success">Success</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="success">成功</SelectItem>
+            <SelectItem value="failed">失败</SelectItem>
+            <SelectItem value="pending">待处理</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -56,16 +56,16 @@ export default function ExecutionsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="p-3 font-medium">Request ID</th>
-                  <th className="p-3 font-medium">Agent</th>
-                  <th className="p-3 font-medium">Version</th>
-                  <th className="p-3 font-medium">Input</th>
-                  <th className="p-3 font-medium">Output</th>
-                  <th className="p-3 font-medium">Total</th>
-                  <th className="p-3 font-medium">Cost</th>
-                  <th className="p-3 font-medium">Latency</th>
-                  <th className="p-3 font-medium">Status</th>
-                  <th className="p-3 font-medium">Time</th>
+                  <th className="p-3 font-medium">请求 ID</th>
+                  <th className="p-3 font-medium">智能体</th>
+                  <th className="p-3 font-medium">版本</th>
+                  <th className="p-3 font-medium">输入</th>
+                  <th className="p-3 font-medium">输出</th>
+                  <th className="p-3 font-medium">总计</th>
+                  <th className="p-3 font-medium">成本</th>
+                  <th className="p-3 font-medium">延迟</th>
+                  <th className="p-3 font-medium">状态</th>
+                  <th className="p-3 font-medium">时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -97,7 +97,7 @@ export default function ExecutionsPage() {
 
       {data?.pagination && data.pagination.totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">Page {data.pagination.page} of {data.pagination.totalPages}</p>
+          <p className="text-sm text-muted-foreground">第 {data.pagination.page} 页，共 {data.pagination.totalPages} 页</p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
             <Button variant="outline" size="sm" disabled={page >= data.pagination.totalPages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></Button>

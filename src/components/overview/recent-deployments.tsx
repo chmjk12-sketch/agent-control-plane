@@ -16,12 +16,12 @@ export function RecentDeployments({ deployments }: { deployments: Deployment[] }
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">Recent Deployments</CardTitle>
+        <CardTitle className="text-sm font-medium">最近部署</CardTitle>
         <Rocket className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent className="space-y-3">
         {deployments.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No recent deployments</p>
+          <p className="text-sm text-muted-foreground text-center py-4">暂无最近部署</p>
         ) : (
           deployments.map((d) => {
             const Icon = statusIcons[d.status] || Clock;

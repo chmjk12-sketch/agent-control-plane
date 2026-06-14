@@ -29,8 +29,8 @@ export default function OverviewPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
-          <p className="text-sm text-muted-foreground mt-1">Loading...</p>
+          <h1 className="text-2xl font-bold tracking-tight">概览</h1>
+          <p className="text-sm text-muted-foreground mt-1">加载中...</p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -46,19 +46,19 @@ export default function OverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
-        <p className="text-sm text-muted-foreground mt-1">Monitor your agent fleet at a glance</p>
+        <h1 className="text-2xl font-bold tracking-tight">概览</h1>
+        <p className="text-sm text-muted-foreground mt-1">一目了然地监控您的智能体集群</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Total Agents" value={stats.totalAgents} icon={Bot} />
-        <StatCard title="Online" value={stats.onlineAgents} icon={Wifi} subtitle={`${stats.offlineAgents} offline`} />
-        <StatCard title="Today Requests" value={stats.todayRequests} icon={Activity} />
-        <StatCard title="Avg Latency" value={formatLatency(stats.avgLatency)} icon={Clock} />
-        <StatCard title="Today Tokens" value={formatTokens(stats.todayTokens)} icon={Zap} />
-        <StatCard title="Today Cost" value={formatCost(stats.todayCost)} icon={Coins} />
-        <StatCard title="Offline" value={stats.offlineAgents} icon={WifiOff} />
-        <StatCard title="Success Rate" value="97.2%" icon={Activity} subtitle="+2.1% from yesterday" />
+        <StatCard title="智能体总数" value={stats.totalAgents} icon={Bot} />
+        <StatCard title="在线" value={stats.onlineAgents} icon={Wifi} subtitle={`${stats.offlineAgents} 离线`} />
+        <StatCard title="今日请求" value={stats.todayRequests} icon={Activity} />
+        <StatCard title="平均延迟" value={formatLatency(stats.avgLatency)} icon={Clock} />
+        <StatCard title="今日 Token" value={formatTokens(stats.todayTokens)} icon={Zap} />
+        <StatCard title="今日成本" value={formatCost(stats.todayCost)} icon={Coins} />
+        <StatCard title="离线" value={stats.offlineAgents} icon={WifiOff} />
+        <StatCard title="成功率" value="97.2%" icon={Activity} subtitle="较昨日 +2.1%" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -69,7 +69,7 @@ export default function OverviewPage() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium">Agent Cost Breakdown (Today)</CardTitle>
+          <CardTitle className="text-sm font-medium">智能体成本明细（今日）</CardTitle>
           <Coins className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
@@ -83,7 +83,7 @@ export default function OverviewPage() {
                     <div className="h-full rounded-full bg-primary/70 transition-all" style={{ width: `${(agent.cost / maxCost) * 100}%` }} />
                   </div>
                   <span className="text-sm text-muted-foreground w-20 text-right">{formatCost(agent.cost)}</span>
-                  <span className="text-xs text-muted-foreground w-16 text-right">{agent.requests} reqs</span>
+                  <span className="text-xs text-muted-foreground w-16 text-right">{agent.requests} 次请求</span>
                 </div>
               );
             })}

@@ -38,19 +38,19 @@ export default function DeploymentsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Deployments</h1>
-        <p className="text-sm text-muted-foreground mt-1">Release history and rollback management</p>
+        <h1 className="text-2xl font-bold tracking-tight">部署管理</h1>
+        <p className="text-sm text-muted-foreground mt-1">发布历史与回滚管理</p>
       </div>
 
       <div className="flex items-center gap-4">
         <Select value={statusFilter || "all"} onValueChange={(v) => { setStatusFilter(v === "all" ? "" : v); setPage(1); }}>
-          <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+          <SelectTrigger className="w-[160px]"><SelectValue placeholder="全部状态" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="success">Success</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="rolled_back">Rolled Back</SelectItem>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="success">成功</SelectItem>
+            <SelectItem value="failed">失败</SelectItem>
+            <SelectItem value="pending">待处理</SelectItem>
+            <SelectItem value="rolled_back">已回滚</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -66,7 +66,7 @@ export default function DeploymentsPage() {
                   <div className="p-2 rounded-lg bg-secondary/50"><Rocket className="h-4 w-4" /></div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{d.agent?.name || "Unknown"}</span>
+                      <span className="font-medium text-sm">{d.agent?.name || "未知"}</span>
                       <Badge variant="secondary" className="text-[10px]">{d.version?.versionTag || "N/A"}</Badge>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
@@ -80,7 +80,7 @@ export default function DeploymentsPage() {
                   <Badge variant={statusColors[d.status] || "secondary"}>{d.status}</Badge>
                   {d.status === "success" && (
                     <Button variant="outline" size="sm" onClick={() => handleRollback(d.id)}>
-                      <RotateCcw className="h-3 w-3 mr-1" />Rollback
+                      <RotateCcw className="h-3 w-3 mr-1" />回滚
                     </Button>
                   )}
                 </div>
@@ -92,7 +92,7 @@ export default function DeploymentsPage() {
 
       {data?.pagination && data.pagination.totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">Page {data.pagination.page} of {data.pagination.totalPages}</p>
+          <p className="text-sm text-muted-foreground">第 {data.pagination.page} 页，共 {data.pagination.totalPages} 页</p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
             <Button variant="outline" size="sm" disabled={page >= data.pagination.totalPages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
