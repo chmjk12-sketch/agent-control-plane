@@ -31,15 +31,27 @@ export const GET = apiHandler(async (req: NextRequest) => {
 
 export const POST = apiHandler(async (req: NextRequest) => {
   const body = await req.json();
+
+  // V2.0: 支持 deploy-notify 触发或手动创建
+  const isDeployNotify = body.triggerSource === "deploy_notify";
+
   const deployment = await prisma.deployment.create({
     data: {
       agentId: body.agentId,
       versionId: body.versionId,
       gitCommit: body.gitCommit,
       imageTag: body.imageTag,
-      status: "pending",
-      resultLog: "Deployment initiated...",
+      slot: body.slot || "blue",
+      trafficWeight: body.trafficWeight || 100,
+      status: isDeployNotify ? "success" : "pending",
+      triggerSource: body.triggerSource || "manual",
+      deployedBy: body.deployedBy || null,
+      resultLog: isDeployNotify
+        ? "部署成功（由 GitHub Actions 通知）"
+        : "Deployment initiated...",
       deployedAt: new Date(),
+      startedAt: isDeployNotify ? new Date() : null,
+      finishedAt: isDeployNotify ? new Date() : null,
     },
   });
   return NextResponse.json(deployment, { status: 201 });

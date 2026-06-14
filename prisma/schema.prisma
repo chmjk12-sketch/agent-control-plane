@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -20,22 +20,37 @@ model User {
 }
 
 model Agent {
-  id          String   @id @default(cuid())
-  name        String
-  slug        String   @unique
-  description String?
-  status      String   @default("offline")
-  model       String   @default("gpt-4")
-  tags        String   @default("[]")
-  icon        String   @default("bot")
-  endpoint    String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  description         String?
+  status              String   @default("offline")
+  model               String   @default("deepseek-chat")
+  tags                String   @default("[]")
+  icon                String   @default("bot")
+  endpoint            String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  versions    AgentVersion[]
-  deployments Deployment[]
-  executions  AgentExecution[]
-  health      AgentHealth[]
+  // V2.0 新增字段
+  environmentSlot     String   @default("blue") @map("environment_slot")
+  trafficWeight       Int      @default(100) @map("traffic_weight")
+  deployStrategy      String   @default("blue-green") @map("deploy_strategy")
+  healthCheckPath     String   @default("/health") @map("health_check_path")
+  healthCheckInterval Int      @default(30) @map("health_check_interval")
+  containerName       String?  @map("container_name")
+  internalPort        Int      @default(3000) @map("internal_port")
+  registryImage       String?  @map("registry_image")
+  maxCostBudget       Float    @default(0) @map("max_cost_budget")
+  apiKeyHash          String?  @map("api_key_hash")
+
+  versions       AgentVersion[]
+  deployments    Deployment[]
+  executions     AgentExecution[]
+  health         AgentHealth[]
+  healthCheckLogs HealthCheckLog[]
+  alerts         Alert[]
+  apiKeys        ApiKey[]
 }
 
 model AgentVersion {
@@ -58,17 +73,26 @@ model AgentVersion {
 }
 
 model Deployment {
-  id         String       @id @default(cuid())
-  agentId    String       @map("agent_id")
-  agent      Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  versionId  String?      @map("version_id")
-  version    AgentVersion? @relation(fields: [versionId], references: [id])
-  gitCommit  String?      @map("git_commit")
-  imageTag   String?      @map("image_tag")
-  status     String       @default("pending")
-  resultLog  String?      @map("result_log")
-  deployedAt DateTime?    @map("deployed_at")
-  createdAt  DateTime     @default(now()) @map("created_at")
+  id           String    @id @default(cuid())
+  agentId      String    @map("agent_id")
+  agent        Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  versionId    String?   @map("version_id")
+  version      AgentVersion? @relation(fields: [versionId], references: [id])
+  gitCommit    String?   @map("git_commit")
+  imageTag     String?   @map("image_tag")
+  status       String    @default("pending")
+  resultLog    String?   @map("result_log")
+  deployedAt   DateTime? @map("deployed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // V2.0 新增字段
+  slot         String    @default("blue")
+  trafficWeight Int     @default(100) @map("traffic_weight")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  deployedBy   String?   @map("deployed_by")
+  triggerSource String   @default("manual") @map("trigger_source")
+  rollbackFromId String?  @map("rollback_from_id")
 }
 
 model AgentExecution {
@@ -101,4 +125,47 @@ model AgentHealth {
   restartCount  Int       @default(0) @map("restart_count")
   lastHeartbeat DateTime? @map("last_heartbeat")
   createdAt     DateTime  @default(now()) @map("created_at")
+}
+
+// V2.0 新增表
+model HealthCheckLog {
+  id            String   @id @default(cuid())
+  agentId       String   @map("agent_id")
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  status        String   // healthy | unhealthy | timeout
+  responseTimeMs Int     @default(0) @map("response_time_ms")
+  statusCode    Int?     @map("status_code")
+  error         String?
+  checkedAt     DateTime @default(now()) @map("checked_at")
+
+  @@index([agentId, checkedAt])
+}
+
+model Alert {
+  id          String    @id @default(cuid())
+  agentId     String    @map("agent_id")
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  type        String    // health | deployment | cost
+  severity    String    // info | warning | critical
+  message     String
+  resolved    Boolean   @default(false)
+  resolvedAt  DateTime? @map("resolved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([agentId, createdAt])
+  @@index([resolved, severity])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  agentId     String    @map("agent_id")
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  keyHash     String    @map("key_hash")
+  keyPrefix   String    @map("key_prefix")
+  name        String?
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([agentId])
 }

@@ -8,6 +8,10 @@ const MODEL_PRICING: Record<
   string,
   { input: number; output: number }
 > = {
+  // DeepSeek (https://api-docs.deepseek.com/quick_start/pricing)
+  "deepseek-chat": { input: 0.0015, output: 0.006 },
+  "deepseek-reasoner": { input: 0.004, output: 0.016 },
+  // OpenAI
   "gpt-4": { input: 0.03, output: 0.06 },
   "gpt-4-turbo": { input: 0.01, output: 0.03 },
   "gpt-3.5-turbo": { input: 0.0005, output: 0.0015 },

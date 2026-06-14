@@ -69,11 +69,18 @@ export const POST = apiHandler(async (req: NextRequest) => {
       name: body.name,
       slug: body.slug || body.name.toLowerCase().replace(/\s+/g, "-"),
       description: body.description,
-      model: body.model || "gpt-4",
+      model: body.model || "deepseek-chat",
       tags: JSON.stringify(body.tags || []),
       icon: body.icon || "bot",
       endpoint: body.endpoint,
       status: "offline",
+      // V2.0 新增字段
+      containerName: body.containerName || body.slug,
+      internalPort: body.internalPort || 3000,
+      deployStrategy: body.deployStrategy || "blue-green",
+      healthCheckPath: body.healthCheckPath || "/health",
+      healthCheckInterval: body.healthCheckInterval || 30,
+      maxCostBudget: body.maxCostBudget || 0,
     },
   });
   return NextResponse.json(agent, { status: 201 });

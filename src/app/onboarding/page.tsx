@@ -28,11 +28,10 @@ import {
 import Link from "next/link";
 
 const modelOptions = [
-  "gpt-4",
+  "deepseek-chat",
+  "deepseek-reasoner",
   "gpt-4o",
   "gpt-4o-mini",
-  "gpt-3.5-turbo",
-  "claude-3-opus",
   "claude-3-sonnet",
   "自定义",
 ];
@@ -51,7 +50,7 @@ export default function OnboardingPage() {
   // Step 1 - Agent info
   const [form, setForm] = useState({
     name: "",
-    model: "gpt-4",
+    model: "deepseek-chat",
     endpoint: "",
     apiKey: "",
   });
