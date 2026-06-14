@@ -56,8 +56,8 @@ jobs:
         if: steps.ssh-deploy.outcome == 'failure'
         run: |
           python3 -c "
-          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
-          from datetime import datetime, timezone, time
+          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid, time
+          from datetime import datetime, timezone
           AK_ID='${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
           AK_SECRET='${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
           def sign(p):
