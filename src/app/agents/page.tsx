@@ -1,12 +1,21 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bot, Plus, Search, Wifi, WifiOff, AlertTriangle, ArrowRight } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Bot, Plus, Search, Wifi, WifiOff, AlertTriangle, ArrowRight, Loader2 } from "lucide-react";
 import { formatCost } from "@/lib/utils";
 
 const statusConfig: Record<string, { icon: any; color: "success" | "destructive" | "warning"; label: string }> = {
@@ -15,13 +24,34 @@ const statusConfig: Record<string, { icon: any; color: "success" | "destructive"
   degraded: { icon: AlertTriangle, color: "warning", label: "降级" },
 };
 
+const modelOptions = [
+  "gpt-4",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-3.5-turbo",
+  "claude-3-opus",
+  "claude-3-sonnet",
+  "自定义",
+];
+
 export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
+  // Create dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    model: "gpt-4",
+    endpoint: "",
+    description: "",
+    tags: "",
+  });
+
+  const fetchAgents = useCallback(() => {
     setIsLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
@@ -34,6 +64,48 @@ export default function AgentsPage() {
       .finally(() => setIsLoading(false));
   }, [search, statusFilter]);
 
+  useEffect(() => {
+    fetchAgents();
+  }, [fetchAgents]);
+
+  const resetForm = () => {
+    setForm({ name: "", model: "gpt-4", endpoint: "", description: "", tags: "" });
+  };
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) return;
+    setCreating(true);
+    try {
+      const tags = form.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const body: any = { name: form.name.trim(), model: form.model };
+      if (form.endpoint.trim()) body.endpoint = form.endpoint.trim();
+      if (form.description.trim()) body.description = form.description.trim();
+      if (tags.length > 0) body.tags = tags;
+
+      const res = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "创建失败");
+      }
+
+      setDialogOpen(false);
+      resetForm();
+      fetchAgents();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -41,7 +113,90 @@ export default function AgentsPage() {
           <h1 className="text-2xl font-bold tracking-tight">智能体</h1>
           <p className="text-sm text-muted-foreground mt-1">管理和监控您的 AI 智能体</p>
         </div>
-        <Button><Plus className="h-4 w-4 mr-2" />新建智能体</Button>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />新建智能体
+          </Button>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle>新建智能体</DialogTitle>
+              <DialogDescription>填写智能体基本信息，创建后可在详情页进一步配置。</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  智能体名称 <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  placeholder="例如：客服助手"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">模型</label>
+                <Select value={form.model} onValueChange={(v) => setForm({ ...form, model: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelOptions.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">服务端点</label>
+                <Input
+                  placeholder="已部署应用的 URL 地址（可选）"
+                  value={form.endpoint}
+                  onChange={(e) => setForm({ ...form, endpoint: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">描述</label>
+                <textarea
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="智能体功能描述（可选）"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">标签</label>
+                <Input
+                  placeholder="多个标签用逗号分隔（可选）"
+                  value={form.tags}
+                  onChange={(e) => setForm({ ...form, tags: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline" disabled={creating}>取消</Button>
+              </DialogClose>
+              <Button onClick={handleCreate} disabled={creating || !form.name.trim()}>
+                {creating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    创建中...
+                  </>
+                ) : (
+                  "确认创建"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="flex items-center gap-4">

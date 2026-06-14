@@ -14,12 +14,13 @@ const mainNav = [
   { href: "/overview", label: "概览", icon: LayoutDashboard },
   { href: "/agents", label: "智能体", icon: Bot },
   { href: "/executions", label: "执行记录", icon: Play },
+  { href: "/test", label: "测试", icon: FlaskConical },
   { href: "/deployments", label: "部署管理", icon: Rocket },
 ];
 
 const secondaryNav = [
   { href: "/health", label: "健康监控", icon: Heart },
-  { href: "/costs", label: "成本分析", icon: DollarSign },
+  { href: "/costs", label: "Token 监控", icon: DollarSign },
   { href: "/alerts", label: "告警中心", icon: Bell },
 ];
 
