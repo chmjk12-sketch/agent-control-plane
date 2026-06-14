@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  image     String?
+  role      String   @default("member")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  executions AgentExecution[]
+}
+
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  status      String   @default("offline")
+  model       String   @default("gpt-4")
+  tags        String   @default("[]")
+  icon        String   @default("bot")
+  endpoint    String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  versions    AgentVersion[]
+  deployments Deployment[]
+  executions  AgentExecution[]
+  health      AgentHealth[]
+}
+
+model AgentVersion {
+  id         String   @id @default(cuid())
+  agentId    String   @map("agent_id")
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  versionTag String   @map("version_tag")
+  codeRef    String?  @map("code_ref")
+  promptRef  String?  @map("prompt_ref")
+  modelRef   String?  @map("model_ref")
+  toolConfig String?  @map("tool_config")
+  envVars    String?  @map("env_vars")
+  imageTag   String?  @map("image_tag")
+  gitCommit  String?  @map("git_commit")
+  changelog  String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  deployments Deployment[]
+  executions  AgentExecution[]
+}
+
+model Deployment {
+  id         String       @id @default(cuid())
+  agentId    String       @map("agent_id")
+  agent      Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  versionId  String?      @map("version_id")
+  version    AgentVersion? @relation(fields: [versionId], references: [id])
+  gitCommit  String?      @map("git_commit")
+  imageTag   String?      @map("image_tag")
+  status     String       @default("pending")
+  resultLog  String?      @map("result_log")
+  deployedAt DateTime?    @map("deployed_at")
+  createdAt  DateTime     @default(now()) @map("created_at")
+}
+
+model AgentExecution {
+  id           String       @id @default(cuid())
+  agentId      String       @map("agent_id")
+  agent        Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  versionId    String?      @map("version_id")
+  version      AgentVersion? @relation(fields: [versionId], references: [id])
+  requestId    String       @unique @map("request_id")
+  userId       String?      @map("user_id")
+  user         User?        @relation(fields: [userId], references: [id])
+  inputTokens  Int          @default(0) @map("input_tokens")
+  outputTokens Int          @default(0) @map("output_tokens")
+  totalTokens  Int          @default(0) @map("total_tokens")
+  cost         Float        @default(0)
+  latencyMs    Int          @default(0) @map("latency_ms")
+  status       String       @default("pending")
+  errorMsg     String?      @map("error_msg")
+  createdAt    DateTime     @default(now()) @map("created_at")
+}
+
+model AgentHealth {
+  id            String    @id @default(cuid())
+  agentId       String    @map("agent_id")
+  agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  status        String    @default("offline")
+  uptime        Int       @default(0)
+  memoryMb      Float     @default(0) @map("memory_mb")
+  cpuPercent    Float     @default(0) @map("cpu_percent")
+  restartCount  Int       @default(0) @map("restart_count")
+  lastHeartbeat DateTime? @map("last_heartbeat")
+  createdAt     DateTime  @default(now()) @map("created_at")
+}

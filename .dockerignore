@@ -1,0 +1,14 @@
+.git
+.github
+.next
+node_modules
+.env
+.env.local
+.env.development
+.env.production
+*.md
+npm-debug.log
+yarn-error.log
+.DS_Store
+.vscode
+.idea
