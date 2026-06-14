@@ -125,7 +125,7 @@ jobs:
           APP_PORT='${{ env.APP_PORT }}'
           REG_USER='${{ secrets.REGISTRY_USERNAME }}'
           REG_PASS='${{ secrets.REGISTRY_PASSWORD }}'
-          CP_SECRET='${{ secrets.CP_NOTIFY_SECRET || \"cp_notify_secret_2024_change_me\" }}'
+          CP_SECRET='${{ secrets.CP_NOTIFY_SECRET }}'
           deploy_cmd=f'''# V2.0: PostgreSQL + 控制平面部署
           # 1. 确保 PostgreSQL 运行
           if ! docker ps | grep -q cp-postgres; then
