@@ -11,6 +11,7 @@ env:
   REGISTRY_NAMESPACE: chmjk67
   DOMAIN: chmjk67.top
   ECS_IP: 39.105.86.184
+  INSTANCE_ID: i-2zeee6djmc1qhwptmz1l
 
 jobs:
   build-and-deploy:
@@ -32,102 +33,22 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
 
-      # Step A: 尝试 SSH 部署
-      - name: Deploy via SSH
-        id: ssh-deploy
-        continue-on-error: true
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 120s
-          script: |
-            set -e
-
-            # === 自动探测空闲端口（从 3000 开始，跳过已占用的） ===
-            find_free_port() {
-              local port=$1
-              while ss -tlnp | grep -q ":${port} "; do
-                port=$((port + 1))
-              done
-              echo $port
-            }
-            APP_PORT=$(find_free_port 3000)
-            echo "DEPLOY_PORT=$APP_PORT" >> $GITHUB_ENV
-            echo "使用端口: $APP_PORT"
-
-            # 确保 PostgreSQL 运行
-            if ! docker ps | grep -q cp-postgres; then
-              docker run -d \
-                --name cp-postgres \
-                --restart always \
-                --network caddy-net \
-                -e POSTGRES_USER=cp_admin \
-                -e POSTGRES_PASSWORD=cp_admin_2024_secure \
-                -e POSTGRES_DB=agent_control_plane \
-                -v cp-postgres-data:/var/lib/postgresql/data \
-                postgres:16-alpine
-              echo "PostgreSQL started, waiting..."
-              sleep 15
-            fi
-
-            # 拉取最新镜像
-            docker pull ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
-
-            # 停止旧容器
-            docker stop ${{ env.APP_NAME }}_app 2>/dev/null || true
-            docker rm ${{ env.APP_NAME }}_app 2>/dev/null || true
-
-            # 启动新容器
-            docker run -d \
-              --name ${{ env.APP_NAME }}_app \
-              -p ${APP_PORT}:3000 \
-              --restart always \
-              --network caddy-net \
-              -e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public" \
-              -e NODE_ENV=production \
-              -e SELF_URL="https://administrator.chmjk67.top" \
-              -e CP_NOTIFY_SECRET="${{ secrets.CP_NOTIFY_SECRET }}" \
-              ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
-
-            # 数据库迁移
-            sleep 8
-            docker exec ${{ env.APP_NAME }}_app npx prisma migrate deploy --skip-generate 2>&1 || echo "MIGRATE_WARN"
-
-            # 健康检查
-            sleep 5
-            curl -sf http://127.0.0.1:${APP_PORT}/api/overview && echo "HEALTH_OK" || echo "HEALTH_FAIL"
-
-            # 更新 Caddy 路由
-            if grep -q "administrator.chmjk67.top" /opt/app/Caddyfile; then
-              sed -i "s|reverse_proxy .*:.*|reverse_proxy ${{ env.APP_NAME }}_app:3000|" /opt/app/Caddyfile
-            else
-              echo "" >> /opt/app/Caddyfile
-              echo "administrator.chmjk67.top {" >> /opt/app/Caddyfile
-              echo "    reverse_proxy ${{ env.APP_NAME }}_app:3000" >> /opt/app/Caddyfile
-              echo "}" >> /opt/app/Caddyfile
-            fi
-            docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-            echo "Caddy updated"
-
-      # Step B: SSH 失败则走 RunCommand API 降级
-      - name: Deploy via RunCommand API (fallback)
-        if: steps.ssh-deploy.outcome == 'failure'
+      # 部署：通过 RunCommand 调用服务器上的 deploy-cp.sh
+      # 首次运行时会自动上传脚本到服务器
+      - name: Deploy to server
         run: |
           python3 << 'PYEOF'
-          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid, time, textwrap
+          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid, time
           from datetime import datetime, timezone
 
           AK_ID = '${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
           AK_SECRET = '${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
+          INSTANCE_ID = '${{ env.INSTANCE_ID }}'
           REGISTRY = '${{ env.REGISTRY }}'
           NAMESPACE = '${{ env.REGISTRY_NAMESPACE }}'
           APP_NAME = '${{ env.APP_NAME }}'
           REG_USER = '${{ secrets.REGISTRY_USERNAME }}'
           REG_PASS = '${{ secrets.REGISTRY_PASSWORD }}'
-          CP_SECRET = '${{ secrets.CP_NOTIFY_SECRET }}'
-          INSTANCE_ID = 'i-2zeee6djmc1qhwptmz1l'
 
           def sign(params):
               sp = sorted(params.items())
@@ -149,9 +70,9 @@ jobs:
                   'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                   'SignatureNonce': str(uuid.uuid4())
               }
-              r = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p), timeout=10)
+              r = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p), timeout=15)
               iid = json.loads(r.read())['InvokeId']
-              for _ in range(timeout // 5):
+              for i in range(timeout // 5):
                   time.sleep(5)
                   p2 = {
                       'Action': 'DescribeInvocationResults', 'RegionId': 'cn-beijing',
@@ -161,84 +82,34 @@ jobs:
                       'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                       'SignatureNonce': str(uuid.uuid4())
                   }
-                  r2 = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p2), timeout=10)
+                  r2 = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p2), timeout=15)
                   for res in json.loads(r2.read()).get('Invocation', {}).get('InvocationResults', {}).get('InvocationResult', []):
                       if res.get('InvocationStatus') in ('Success', 'Failed', 'Finished'):
                           o = res.get('Output', '') or ''
                           print(base64.b64decode(o).decode('utf-8', 'replace') if o else res['InvocationStatus'])
                           return
 
-          deploy_cmd = textwrap.dedent(f'''\
+          # 读取 deploy-cp.sh 脚本内容
+          with open('scripts/deploy-cp.sh', 'r') as f:
+              script_content = f.read()
+
+          # 部署命令：上传脚本 + 执行
+          deploy_cmd = """#!/bin/bash
           set -e
+          mkdir -p /opt/app/scripts
 
-          # 自动探测空闲端口
-          find_free_port() {{
-            local port=$1
-            while ss -tlnp | grep -q ":$port "; do
-              port=$((port + 1))
-            done
-            echo $port
-          }}
-          APP_PORT=$(find_free_port 3000)
-          echo "DEPLOY_PORT=$APP_PORT" >> $GITHUB_ENV
-          echo "=== 使用端口: $APP_PORT ==="
+          # 写入部署脚本
+          cat > /opt/app/scripts/deploy-cp.sh << 'SCRIPTEOF'
+          """ + script_content + """
+          SCRIPTEOF
+          chmod +x /opt/app/scripts/deploy-cp.sh
 
-          # 1. 确保 PostgreSQL 运行
-          if ! docker ps | grep -q cp-postgres; then
-            docker run -d --name cp-postgres --restart always --network caddy-net \\\\
-              -e POSTGRES_USER=cp_admin -e POSTGRES_PASSWORD=cp_admin_2024_secure \\\\
-              -e POSTGRES_DB=agent_control_plane -v cp-postgres-data:/var/lib/postgresql/data \\\\
-              postgres:16-alpine
-            echo "PostgreSQL started"
-            sleep 15
-          else
-            echo "PostgreSQL already running"
-          fi
+          # 执行部署
+          /opt/app/scripts/deploy-cp.sh """ + REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':' + '${{ github.sha }}'
 
-          # 2. 拉取最新镜像
-          docker login --username={REG_USER} --password={REG_PASS} {REGISTRY}
-          docker pull {REGISTRY}/{NAMESPACE}/{APP_NAME}:latest
-
-          # 3. 部署控制平面
-          docker stop {APP_NAME}_app 2>/dev/null; docker rm {APP_NAME}_app 2>/dev/null
-          docker run -d --name {APP_NAME}_app -p $APP_PORT:3000 --restart always --network caddy-net \\\\
-            -e DATABASE_URL=postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public \\\\
-            -e NODE_ENV=production \\\\
-            -e SELF_URL=https://administrator.chmjk67.top \\\\
-            -e CP_NOTIFY_SECRET={CP_SECRET} \\\\
-            {REGISTRY}/{NAMESPACE}/{APP_NAME}:latest
-
-          # 4. 数据库迁移
-          sleep 8
-          docker exec {APP_NAME}_app npx prisma migrate deploy --skip-generate 2>&1 || echo MIGRATE_WARN
-
-          # 5. 健康检查
-          sleep 5
-          curl -sf http://127.0.0.1:$APP_PORT/api/overview && echo HEALTH_OK || echo HEALTH_FAIL
-
-          # 6. 更新 Caddy 路由
-          if grep -q "administrator.chmjk67.top" /opt/app/Caddyfile; then
-            sed -i "s|reverse_proxy .*:.*|reverse_proxy {APP_NAME}_app:3000|" /opt/app/Caddyfile
-          else
-            echo "" >> /opt/app/Caddyfile
-            echo "administrator.chmjk67.top {{" >> /opt/app/Caddyfile
-            echo "    reverse_proxy {APP_NAME}_app:3000" >> /opt/app/Caddyfile
-            echo "}}" >> /opt/app/Caddyfile
-          fi
-          docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-          echo "Caddy updated"
-          ''')
-
+          print("=== 开始部署 ===")
           run_cmd(deploy_cmd, timeout=300)
           PYEOF
-
-      - name: Verify deployment
-        run: |
-          sleep 15
-          # 尝试通过域名验证（Caddy 反向代理走容器内部 3000 端口）
-          curl -sf "http://${{ env.ECS_IP }}:3004/api/overview" 2>/dev/null && echo "OK:3004" || \
-          curl -sf "http://${{ env.ECS_IP }}:3080/api/overview" 2>/dev/null && echo "OK:3080" || \
-          echo "DIRECT_FAIL_TRY_DOMAIN"
 
       - name: Ensure DNS A record
         run: |
@@ -257,9 +128,8 @@ jobs:
           try:
               r=urllib.request.urlopen('https://dns.aliyuncs.com/?'+sign(p),timeout=10)
               d=json.loads(r.read())
-              if 'RecordId' in d: print('DNS record added')
-              else: print('DNS may already exist or error:', d)
+              if 'RecordId' in d: print('DNS OK')
+              else: print('DNS may exist:', d)
           except Exception as e:
-              print('DNS API error:', e)
-              print('Please manually add A record: administrator -> ${{ env.ECS_IP }}')
+              print('DNS:', e)
           "
