@@ -7,7 +7,7 @@ on:
 
 env:
   APP_NAME: agent-control-plane
-  APP_PORT: "3004"
+  APP_PORT: "3080"
   REGISTRY: crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com
   REGISTRY_NAMESPACE: chmjk67
   DOMAIN: chmjk67.top
