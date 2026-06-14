@@ -89,23 +89,18 @@ jobs:
                           print(base64.b64decode(o).decode('utf-8', 'replace') if o else res['InvocationStatus'])
                           return
 
-          # 读取 deploy-cp.sh 脚本内容
+          # 读取脚本并用 base64 编码传递（避免 heredoc 转义问题）
           with open('scripts/deploy-cp.sh', 'r') as f:
-              script_content = f.read()
+              script_b64 = base64.b64encode(f.read().encode()).decode()
 
-          # 部署命令：上传脚本 + 执行
-          deploy_cmd = """#!/bin/bash
-          set -e
-          mkdir -p /opt/app/scripts
+          IMAGE = REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':' + '${{ github.sha }}'
 
-          # 写入部署脚本
-          cat > /opt/app/scripts/deploy-cp.sh << 'SCRIPTEOF'
-          """ + script_content + """
-          SCRIPTEOF
-          chmod +x /opt/app/scripts/deploy-cp.sh
-
-          # 执行部署
-          /opt/app/scripts/deploy-cp.sh """ + REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':' + '${{ github.sha }}'
+          # 部署命令：base64 解码写入脚本 + 执行
+          deploy_cmd = 'set -e && ' \
+              'mkdir -p /opt/app/scripts && ' \
+              'echo "' + script_b64 + '" | base64 -d > /opt/app/scripts/deploy-cp.sh && ' \
+              'chmod +x /opt/app/scripts/deploy-cp.sh && ' \
+              '/opt/app/scripts/deploy-cp.sh ' + IMAGE
 
           print("=== 开始部署 ===")
           run_cmd(deploy_cmd, timeout=300)
