@@ -174,7 +174,7 @@ jobs:
           # 自动探测空闲端口
           find_free_port() {{
             local port=$1
-            while ss -tlnp | grep -q ":${{port}} "; do
+            while ss -tlnp | grep -q ":$port "; do
               port=$((port + 1))
             done
             echo $port
