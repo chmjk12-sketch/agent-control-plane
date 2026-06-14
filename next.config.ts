@@ -1,9 +1,1 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  output: "standalone",
-  allowedDevOrigins: ["*"],
-  serverExternalPackages: ["@prisma/client", "prisma"],
-};
-
-export default nextConfig;
+aW1wb3J0IHR5cGUgeyBOZXh0Q29uZmlnIH0gZnJvbSAibmV4dCI7Cgpjb25zdCBuZXh0Q29uZmlnOiBOZXh0Q29uZmlnID0gewogIG91dHB1dDogInN0YW5kYWxvbmUiLAogIGFsbG93ZWREZXZPcmlnaW5zOiBbIioiXSwKICBzZXJ2ZXJFeHRlcm5hbFBhY2thZ2VzOiBbIkBwcmlzbWEvY2xpZW50IiwgInByaXNtYSJdLAogIGVzbGludDogewogICAgaWdub3JlRHVyaW5nQnVpbGRzOiB0cnVlLAogIH0sCiAgdHlwZXNjcmlwdDogewogICAgaWdub3JlQnVpbGRFcnJvcnM6IHRydWUsCiAgfSwKfTsKCmV4cG9ydCBkZWZhdWx0IG5leHRDb25maWc7Cg==
