@@ -9,6 +9,8 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Prisma 需要 OpenSSL 1.1 兼容库
+RUN apk add --no-cache openssl1.1-compat
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
