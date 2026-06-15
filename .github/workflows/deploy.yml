@@ -206,7 +206,11 @@ jobs:
             echo "=== Caddy 容器挂载信息 ==="
             docker inspect caddy --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null || echo "caddy container not found"
 
-            docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+            docker exec caddy caddy validate --config /etc/caddy/Caddyfile 2>/dev/null || echo "Caddy validate warning"
+            docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || {
+              echo "Caddy reload failed, restarting container..."
+              docker restart caddy 2>/dev/null || echo "Caddy restart failed"
+            }
             echo "Caddy 配置已更新"
 
             echo ""
