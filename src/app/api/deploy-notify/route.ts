@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiHandler, authenticateDeployNotify } from "@/lib/api-helpers";
+import { addAgentRoute } from "@/lib/caddy-manager";
+import { mcpHub } from "@/lib/mcp-hub";
 
 export const POST = apiHandler(async (req: NextRequest) => {
   // 鉴权
@@ -12,7 +14,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
   }
 
   const body = await req.json();
-  const { agentSlug, image, commit, deployedBy, trigger } = body;
+  const { agentSlug, image, commit, deployedBy, trigger, mcpTools } = body;
 
   if (!agentSlug || !image) {
     return NextResponse.json(
@@ -61,6 +63,27 @@ export const POST = apiHandler(async (req: NextRequest) => {
       updatedAt: new Date(),
     },
   });
+
+  // 自动添加 Caddy 路由
+  try {
+    await addAgentRoute({
+      slug: agent.slug,
+      containerName: agent.containerName,
+      slot: targetSlot,
+      internalPort: agent.internalPort,
+    });
+  } catch (err: any) {
+    console.error(`添加 Caddy 路由失败 (${agent.slug}):`, err.message);
+  }
+
+  // 如果 body 中有 mcpTools，自动注册 MCP 工具
+  if (mcpTools && Array.isArray(mcpTools) && mcpTools.length > 0) {
+    try {
+      await mcpHub.registerTools({ agentSlug, tools: mcpTools });
+    } catch (err: any) {
+      console.error(`注册 MCP 工具失败 (${agent.slug}):`, err.message);
+    }
+  }
 
   return NextResponse.json({
     success: true,

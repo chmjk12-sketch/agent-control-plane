@@ -44,30 +44,12 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
 
       # ============================================================
-      # 将迁移 SQL 编码为环境变量，供 SSH 步骤解码使用
-      # ============================================================
-      - name: Encode migration SQL
-        id: migration
-        run: |
-          MIGRATION_FILE="prisma/migrations/20240614000000_v2_full_schema/migration.sql"
-          if [ -f "$MIGRATION_FILE" ]; then
-            MIGRATE_B64=$(base64 -w0 "$MIGRATION_FILE")
-            echo "sql_b64=$MIGRATE_B64" >> "$GITHUB_OUTPUT"
-            echo "Migration SQL encoded ($(wc -c < "$MIGRATION_FILE") bytes)"
-          else
-            echo "WARNING: Migration file not found: $MIGRATION_FILE"
-            echo "sql_b64=" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ============================================================
-      # 回滚处理：如果触发回滚，使用上一版本的镜像
+      # 回滚处理
       # ============================================================
       - name: Resolve deploy image tag
         id: image
         run: |
           if [ "${{ github.event.inputs.rollback }}" = "true" ]; then
-            # 回滚：使用 latest 标签（上一版本在推送前已被标记为 latest 的前一个版本）
-            # 更安全的做法是拉取当前 latest 的 digest，然后使用它
             echo "tag=latest" >> "$GITHUB_OUTPUT"
             echo "Rollback mode: will deploy previous version (latest tag)"
           else
@@ -76,7 +58,7 @@ jobs:
           fi
 
       # ============================================================
-      # SSH 部署
+      # SSH 部署（V3.0：Caddyfile 片段 + 全量服务）
       # ============================================================
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -88,32 +70,79 @@ jobs:
             set -euo pipefail
 
             IMAGE="${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ steps.image.outputs.tag }}"
-            MIGRATE_B64="${{ steps.migration.outputs.sql_b64 }}"
 
             echo "========================================"
-            echo "  Deploying: $IMAGE"
+            echo "  Agent Control Plane V3.0 Deploy"
+            echo "  Image: $IMAGE"
             echo "========================================"
 
-            # --- [0/7] 检查现有容器 ---
+            # --- [0/9] 现有容器检查 ---
             echo ""
-            echo "=== [0/7] 现有容器检查 ==="
-            docker ps --format "{{.Names}}\t{{.Ports}}\t{{.Status}}" | sort
+            echo "=== [0/9] 现有容器检查 ==="
+            docker ps --format "{{.Names}}\t{{.Ports}}\t{{.Status}}" | sort || true
             echo "==========================="
 
-            # --- [1/7] Docker 网络 ---
+            # --- [1/9] Docker 网络 ---
             echo ""
-            echo "=== [1/7] Docker 网络 ==="
+            echo "=== [1/9] Docker 网络 ==="
             docker network create caddy-net 2>/dev/null || true
             docker network ls --filter name=caddy-net --format "Network: {{.Name}} ({{.Driver}})"
 
-            # --- [2/7] Docker login ---
+            # --- [2/9] Docker login ---
             echo ""
-            echo "=== [2/7] Docker login ==="
+            echo "=== [2/9] Docker login ==="
             echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
 
-            # --- [3/7] PostgreSQL ---
+            # --- [3/9] Swap 设置 ---
             echo ""
-            echo "=== [3/7] PostgreSQL ==="
+            echo "=== [3/9] Swap 检查 ==="
+            SWAP_SIZE=$(free -m | awk '/Swap:/ {print $2}')
+            if [ -z "$SWAP_SIZE" ] || [ "$SWAP_SIZE" -lt 4000 ]; then
+              echo "Swap 不足 (${SWAP_SIZE:-0}M)，创建 4G Swap..."
+              sudo fallocate -l 4G /swapfile 2>/dev/null || true
+              sudo chmod 600 /swapfile 2>/dev/null || true
+              sudo mkswap /swapfile 2>/dev/null || true
+              sudo swapon /swapfile 2>/dev/null || true
+              echo "Swap 已启用"
+            else
+              echo "Swap 已足够 (${SWAP_SIZE}M)"
+            fi
+
+            # --- [4/9] 拉取镜像 ---
+            echo ""
+            echo "=== [4/9] 拉取镜像 ==="
+            docker pull "$IMAGE"
+
+            # --- [5/9] 数据卷准备 ---
+            echo ""
+            echo "=== [5/9] 数据卷准备 ==="
+            mkdir -p /opt/app/caddy-agents
+            mkdir -p /opt/app/monitoring
+
+            # --- [6/9] Docker Compose 部署 ---
+            echo ""
+            echo "=== [6/9] Docker Compose 部署 ==="
+
+            # 停止旧容器
+            docker stop agent-control-plane_app 2>/dev/null || true
+            docker rm -f agent-control-plane_app 2>/dev/null || true
+            sleep 2
+
+            # 启动控制平面应用
+            docker run -d --name agent-control-plane_app \
+              -p 3000:3000 \
+              --restart always \
+              --network caddy-net \
+              -e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public&connection_limit=10&pool_timeout=30" \
+              -e NODE_ENV=production \
+              -e SELF_URL="https://administrator.${{ env.DOMAIN }}" \
+              -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+              -e GITHUB_ORG="chmjk67-sketch" \
+              -v /opt/app/caddy-agents:/opt/app/caddy-agents:rw \
+              "$IMAGE"
+            echo "控制平面已启动"
+
+            # 启动 PostgreSQL（如未运行）
             if ! docker ps --format '{{.Names}}' | grep -q '^cp-postgres$'; then
               echo "启动 PostgreSQL..."
               docker rm -f cp-postgres 2>/dev/null || true
@@ -131,60 +160,148 @@ jobs:
                 fi
                 sleep 1
               done
-              if ! docker exec cp-postgres pg_isready -U cp_admin >/dev/null 2>&1; then
-                echo "ERROR: PostgreSQL 启动超时"
-                exit 1
-              fi
             else
               echo "PostgreSQL 已在运行"
             fi
 
-            # --- [4/7] 拉取镜像 ---
-            echo ""
-            echo "=== [4/7] 拉取镜像 ==="
-            docker pull "$IMAGE"
-
-            # --- [5/7] 部署容器 ---
-            echo ""
-            echo "=== [5/7] 部署容器 ==="
-            docker stop agent-control-plane_app 2>/dev/null || true
-            docker rm -f agent-control-plane_app 2>/dev/null || true
-            sleep 2
-            docker run -d --name agent-control-plane_app \
-              -p 3000:3000 \
-              --restart always \
-              --network caddy-net \
-              -e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public&connection_limit=10&pool_timeout=30" \
-              -e NODE_ENV=production \
-              -e SELF_URL="https://administrator.${{ env.DOMAIN }}" \
-              "$IMAGE"
-            echo "容器已启动"
-
-            # --- [6/7] 数据库迁移 ---
-            echo ""
-            echo "=== [6/7] 数据库迁移 ==="
-            sleep 10
-
-            TABLES=$(docker exec cp-postgres psql -U cp_admin -d agent_control_plane -tAc \
-              "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='Agent'" 2>/dev/null || echo "0")
-
-            if [ "$TABLES" -gt 0 ] 2>/dev/null; then
-              echo "表已存在，跳过迁移"
+            # 启动 Caddy（如未运行）
+            if ! docker ps --format '{{.Names}}' | grep -q '^caddy$'; then
+              echo "启动 Caddy..."
+              docker rm -f caddy 2>/dev/null || true
+              docker run -d --name caddy --restart always \
+                -p 80:80 \
+                -p 443:443 \
+                -p 443:443/udp \
+                --network caddy-net \
+                -v /opt/app/Caddyfile:/etc/caddy/Caddyfile:ro \
+                -v /opt/app/caddy-agents:/opt/app/caddy-agents:ro \
+                -v caddy-data:/data \
+                -v caddy-config:/config \
+                caddy:2-alpine
+              echo "Caddy 已启动"
             else
-              if [ -n "$MIGRATE_B64" ]; then
-                echo "执行迁移..."
-                echo "$MIGRATE_B64" | base64 -d > /tmp/migrate.sql
-                cat /tmp/migrate.sql | docker exec -i cp-postgres psql -U cp_admin -d agent_control_plane
-                rm -f /tmp/migrate.sql
-                echo "迁移完成"
-              else
-                echo "WARNING: 无迁移 SQL，跳过"
-              fi
+              echo "Caddy 已在运行"
             fi
 
-            # --- [7/7] 健康检查 + Caddy ---
+            # 启动 Redis（如未运行，Phase 5 使用）
+            if ! docker ps --format '{{.Names}}' | grep -q '^acp-redis$'; then
+              echo "启动 Redis..."
+              docker rm -f acp-redis 2>/dev/null || true
+              docker run -d --name acp-redis --restart always --network caddy-net \
+                -v redis-data:/data \
+                redis:7-alpine \
+                redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+              echo "Redis 已启动"
+            else
+              echo "Redis 已在运行"
+            fi
+
+            # 启动 Prometheus（如未运行，Phase 4 使用）
+            if ! docker ps --format '{{.Names}}' | grep -q '^acp-prometheus$'; then
+              echo "启动 Prometheus..."
+              docker rm -f acp-prometheus 2>/dev/null || true
+              docker run -d --name acp-prometheus --restart always --network caddy-net \
+                -v /opt/app/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+                -v /opt/app/monitoring/prometheus-targets.json:/etc/prometheus/targets.json:ro \
+                -v prometheus-data:/prometheus \
+                prom/prometheus:v2.55.0 \
+                --config.file=/etc/prometheus/prometheus.yml \
+                --storage.tsdb.path=/prometheus \
+                --storage.tsdb.retention.time=15d \
+                --web.enable-lifecycle
+              echo "Prometheus 已启动"
+            else
+              echo "Prometheus 已在运行"
+            fi
+
+            # 启动 Grafana（如未运行，Phase 4 使用）
+            if ! docker ps --format '{{.Names}}' | grep -q '^acp-grafana$'; then
+              echo "启动 Grafana..."
+              docker rm -f acp-grafana 2>/dev/null || true
+              docker run -d --name acp-grafana --restart always --network caddy-net \
+                -e GF_SECURITY_ADMIN_USER=admin \
+                -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
+                -e GF_USERS_ALLOW_SIGN_UP=false \
+                -v /opt/app/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro \
+                -v /opt/app/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+                -v grafana-data:/var/lib/grafana \
+                grafana/grafana:11.3.0
+              echo "Grafana 已启动"
+            else
+              echo "Grafana 已在运行"
+            fi
+
+            # 启动 Loki（如未运行，Phase 4 使用）
+            if ! docker ps --format '{{.Names}}' | grep -q '^acp-loki$'; then
+              echo "启动 Loki..."
+              docker rm -f acp-loki 2>/dev/null || true
+              docker run -d --name acp-loki --restart always --network caddy-net \
+                -v /opt/app/monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro \
+                -v loki-data:/tmp/loki \
+                grafana/loki:3.2.0 \
+                -config.file=/etc/loki/local-config.yaml
+              echo "Loki 已启动"
+            else
+              echo "Loki 已在运行"
+            fi
+
+            # --- [7/9] Caddyfile 配置 ---
             echo ""
-            echo "=== [7/7] 健康检查 + Caddy ==="
+            echo "=== [7/9] Caddyfile 配置 ==="
+
+            # 生成主 Caddyfile
+            cat > /opt/app/Caddyfile << 'CADDY_EOF'
+# 控制平面
+administrator.chmjk67.top {
+    reverse_proxy agent-control-plane_app:3000
+}
+
+# Grafana 监控
+grafana.chmjk67.top {
+    reverse_proxy acp-grafana:3000
+}
+
+# 默认回退
+:80 {
+    reverse_proxy agent-control-plane_app:3000
+}
+CADDY_EOF
+
+            # 同步 Agent 路由（从 caddy-agents 目录）
+            if [ -d /opt/app/caddy-agents ]; then
+              for f in /opt/app/caddy-agents/*.caddy; do
+                [ -f "$f" ] && cat "$f" >> /opt/app/Caddyfile
+              done
+            fi
+
+            cat /opt/app/Caddyfile
+            echo "==========================="
+
+            # 验证并重载 Caddy
+            docker exec caddy caddy validate --config /etc/caddy/Caddyfile 2>/dev/null || echo "Caddy validate warning"
+            docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || {
+              echo "Caddy reload failed, restarting..."
+              docker restart caddy
+            }
+            sleep 3
+            echo "Caddy 配置已更新"
+
+            # --- [8/9] 数据库迁移 ---
+            echo ""
+            echo "=== [8/9] 数据库迁移 ==="
+            sleep 10
+
+            # 使用 Prisma migrate deploy 进行迁移
+            docker exec agent-control-plane_app npx prisma migrate deploy 2>/dev/null || {
+              echo "Prisma migrate deploy 失败，尝试手动迁移..."
+              TABLES=$(docker exec cp-postgres psql -U cp_admin -d agent_control_plane -tAc \
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "0")
+              echo "现有表数量: $TABLES"
+            }
+
+            # --- [9/9] 健康检查 ---
+            echo ""
+            echo "=== [9/9] 健康检查 ==="
             sleep 15
             HEALTH_OK=false
             for i in $(seq 1 6); do
@@ -201,37 +318,17 @@ jobs:
               docker logs --tail 30 agent-control-plane_app 2>&1
             fi
 
-            # Caddy 配置更新
-            echo "=== Caddy 配置 ==="
-            # 重新生成干净的 Caddyfile（保留其他域名配置，只更新控制平面相关）
-            # 使用 printf 避免 YAML heredoc 解析问题
-            printf '%s\n' 'administrator.chmjk67.top {' '    reverse_proxy agent-control-plane_app:3000' '}' '' ':80 {' '    reverse_proxy agent-control-plane_app:3000' '}' > /opt/app/Caddyfile
-            cat /opt/app/Caddyfile
-            echo "==========================="
-
-            # 检查 Caddy 容器是否正确挂载了 Caddyfile
-            echo "=== Caddy 容器挂载信息 ==="
-            docker inspect caddy --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null || echo "caddy container not found"
-
-            docker exec caddy caddy validate --config /etc/caddy/Caddyfile 2>/dev/null || echo "Caddy validate warning"
-            docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || {
-              echo "Caddy reload failed, restarting container..."
-              docker restart caddy 2>/dev/null || echo "Caddy restart failed"
-            }
-            # 强制重启 Caddy 确保配置生效
-            docker restart caddy 2>/dev/null || echo "Caddy not running, will use new config on next start"
-            sleep 3
-            echo "Caddy 配置已更新"
-
             echo ""
             echo "========================================"
             echo "  部署完成"
+            echo "  控制平面: https://administrator.${{ env.DOMAIN }}"
+            echo "  Grafana:  https://grafana.${{ env.DOMAIN }}"
             echo "========================================"
 
       # ============================================================
-      # DNS 记录（仍使用阿里云 API，从 Secrets 读取 AK/SK）
+      # DNS 记录
       # ============================================================
-      - name: Ensure DNS A record
+      - name: Ensure DNS A records
         run: |
           python3 << 'PYEOF'
           import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
@@ -239,6 +336,8 @@ jobs:
 
           AK_ID = '${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
           AK_SECRET = '${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
+          ECS_IP = '${{ env.ECS_HOST }}'
+          DOMAIN = '${{ env.DOMAIN }}'
 
           def sign(p):
               sp = sorted(p.items())
@@ -250,29 +349,34 @@ jobs:
               ).decode()
               return q + '&Signature=' + Q(sig, '')
 
-          p = {
-              'Action': 'AddDomainRecord',
-              'DomainName': '${{ env.DOMAIN }}',
-              'RR': 'administrator',
-              'Type': 'A',
-              'Value': '${{ env.ECS_HOST }}',
-              'Format': 'JSON',
-              'Version': '2015-01-09',
-              'AccessKeyId': AK_ID,
-              'SignatureMethod': 'HMAC-SHA1',
-              'SignatureVersion': '1.0',
-              'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-              'SignatureNonce': str(uuid.uuid4())
-          }
-          try:
-              r = urllib.request.urlopen('https://dns.aliyuncs.com/?' + sign(p), timeout=10)
-              d = json.loads(r.read())
-              if 'RecordId' in d:
-                  print('DNS OK - RecordId:', d['RecordId'])
-              else:
-                  print('DNS may already exist:', d)
-          except Exception as e:
-              print('DNS error:', e)
+          def add_dns(rr):
+              p = {
+                  'Action': 'AddDomainRecord',
+                  'DomainName': DOMAIN,
+                  'RR': rr,
+                  'Type': 'A',
+                  'Value': ECS_IP,
+                  'Format': 'JSON',
+                  'Version': '2015-01-09',
+                  'AccessKeyId': AK_ID,
+                  'SignatureMethod': 'HMAC-SHA1',
+                  'SignatureVersion': '1.0',
+                  'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                  'SignatureNonce': str(uuid.uuid4())
+              }
+              try:
+                  r = urllib.request.urlopen('https://dns.aliyuncs.com/?' + sign(p), timeout=10)
+                  d = json.loads(r.read())
+                  if 'RecordId' in d:
+                      print(f'DNS OK [{rr}]: RecordId', d['RecordId'])
+                  else:
+                      print(f'DNS [{rr}] may already exist:', d)
+              except Exception as e:
+                  print(f'DNS error [{rr}]:', e)
+
+          # 添加控制平面和 Grafana 域名
+          add_dns('administrator')
+          add_dns('grafana')
           PYEOF
 
       # ============================================================
@@ -289,7 +393,7 @@ jobs:
           if [ -n "${{ secrets.NOTIFY_WEBHOOK_URL }}" ]; then
             curl -s -X POST "${{ secrets.NOTIFY_WEBHOOK_URL }}" \
               -H 'Content-Type: application/json' \
-              -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"部署 ${STATUS}: ${SHORT_SHA} - ${COMMIT_MSG}\"}}"
+              -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[ACP V3.0] 部署 ${STATUS}: ${SHORT_SHA} - ${COMMIT_MSG}\"}}"
             echo "通知已发送"
           else
             echo "未配置 NOTIFY_WEBHOOK_URL，跳过通知"

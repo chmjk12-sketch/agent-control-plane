@@ -3,6 +3,11 @@ services:
     image: postgres:16-alpine
     container_name: acp-postgres
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-acp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -27,6 +32,11 @@ services:
     image: agent-control-plane:${IMAGE_TAG:-latest}
     container_name: acp-app
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     env_file:
       - .env
     environment:
@@ -51,12 +61,18 @@ services:
     image: caddy:2-alpine
     container_name: acp-caddy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-agents:/opt/app/caddy-agents:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -71,10 +87,101 @@ services:
       retries: 3
       start_period: 10s
 
+  # 监控服务
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: acp-prometheus
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus-targets.json:/etc/prometheus/targets/targets.json:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    expose:
+      - "9090"
+    networks:
+      - caddy-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: acp-grafana
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${SELF_URL:-https://administrator.chmjk67.top}/grafana/
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    expose:
+      - "3000"
+    networks:
+      - caddy-net
+
+  loki:
+    image: grafana/loki:2.9.6
+    container_name: acp-loki
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    expose:
+      - "3100"
+    networks:
+      - caddy-net
+
+  # Redis 缓存与消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: acp-redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    expose:
+      - "6379"
+    networks:
+      - caddy-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   postgres-data:
   caddy-data:
   caddy-config:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  redis-data:
 
 networks:
   caddy-net:

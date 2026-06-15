@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Agent
+metadata:
+  name: "{{agent_name}}"
+  slug: "{{agent_slug}}"
+  description: "A FastAPI-based AI agent"
+  icon: "bot"
+  tags: ["fastapi", "starter"]
+  version: "1.0.0"
+spec:
+  model: "deepseek-chat"
+  variables:
+    - name: "agent_name"
+      label: "Agent 名称"
+      type: "string"
+      required: true
+    - name: "agent_port"
+      label: "端口"
+      type: "number"
+      default: "3000"
+  tools: []
+  deploy:
+    strategy: "blue-green"
+    port: {{agent_port}}
+    replicas: 1
+    healthCheck:
+      path: "/health"
+      interval: 30
+      timeout: 5
+  mcp:
+    enabled: false

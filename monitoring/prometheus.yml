@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'agent-control-plane'
+
+scrape_configs:
+  # Prometheus 自身监控
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 控制平面应用
+  - job_name: 'control-plane'
+    static_configs:
+      - targets: ['app:3000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
+
+  # Agent 动态发现
+  - job_name: 'agents'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets/*.json'
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: ['__address__']
+        target_label: '__param_target'
+      - source_labels: ['__address__']
+        target_label: 'instance'
+      - target_label: '__address__'
+        replacement: 'prometheus:9090'

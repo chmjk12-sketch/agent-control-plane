@@ -44,13 +44,23 @@ model Agent {
   maxCostBudget       Float    @default(0) @map("max_cost_budget")
   apiKeyHash          String?  @map("api_key_hash")
 
+  // V3.0 新增字段
+  templateId       String?   @map("template_id")
+  template         Template? @relation(fields: [templateId], references: [id])
+  mcpEnabled       Boolean   @default(false) @map("mcp_enabled")
+  mcpToolsEndpoint String?   @map("mcp_tools_endpoint")
+
   versions       AgentVersion[]
   deployments    Deployment[]
   executions     AgentExecution[]
   health         AgentHealth[]
   healthCheckLogs HealthCheckLog[]
   alerts         Alert[]
+  alertRules     AlertRule[]
   apiKeys        ApiKey[]
+  agentTemplates   AgentTemplate[]
+  mcpTools         McpTool[]
+  workflowNodes    WorkflowNode[]
 }
 
 model AgentVersion {
@@ -168,4 +178,129 @@ model ApiKey {
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([agentId])
+}
+
+model AlertRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  metric      String
+  operator    String
+  threshold   Float
+  duration    Int      @default(5)
+  agentId     String?  @map("agent_id")
+  agent       Agent?   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  global      Boolean  @default(false)
+  severity    String   @default("warning")
+  channels    String   @default("[]")
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([agentId])
+  @@index([enabled])
+}
+
+model McpTool {
+  id          String   @id @default(cuid())
+  agentId     String   @map("agent_id")
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  name        String
+  description String
+  inputSchema String   @map("input_schema")
+  endpoint    String
+  method      String   @default("POST")
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([agentId])
+  @@index([name])
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  type        String   @default("fastapi")
+  icon        String   @default("bot")
+  tags        String   @default("[]")
+  githubRepo  String   @default("")
+  githubBranch String  @default("main") @map("github_branch")
+  variables   String   @default("[]")
+  files       String   @default("[]")
+  forkCount   Int      @default(0) @map("fork_count")
+  usageCount  Int      @default(0) @map("usage_count")
+  iterationVersion Int @default(1) @map("iteration_version")
+  iterationNotes   String? @map("iteration_notes")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  agents      Agent[]
+  agentTemplates AgentTemplate[]
+}
+
+model AgentTemplate {
+  id         String   @id @default(cuid())
+  agentId    String   @map("agent_id")
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  templateId String   @map("template_id")
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variables  String   @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  
+  @@unique([agentId, templateId])
+}
+
+model Workflow {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String?
+  status          String   @default("draft")
+  nodes           String   @default("[]")
+  edges           String   @default("[]")
+  variables       String   @default("{}")
+  executionCount  Int      @default(0) @map("execution_count")
+  successCount    Int      @default(0) @map("success_count")
+  failureCount    Int      @default(0) @map("failure_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  executions      WorkflowExecution[]
+}
+
+model WorkflowNode {
+  id          String   @id @default(cuid())
+  workflowId  String   @map("workflow_id")
+  nodeId      String   @map("node_id")
+  type        String
+  label       String
+  config      String   @default("{}")
+  agentId     String?  @map("agent_id")
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  positionX   Float    @default(0) @map("position_x")
+  positionY   Float    @default(0) @map("position_y")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([workflowId])
+  @@index([agentId])
+}
+
+model WorkflowExecution {
+  id          String    @id @default(cuid())
+  workflowId  String    @map("workflow_id")
+  workflow    Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status      String    @default("running")
+  input       String?
+  output      String?
+  nodeResults String    @default("[]") @map("node_results")
+  error       String?
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  durationMs  Int?      @map("duration_ms")
+  
+  @@index([workflowId])
+  @@index([status])
 }
