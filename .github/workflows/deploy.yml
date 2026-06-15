@@ -195,31 +195,43 @@ jobs:
             fi
 
             # Caddy 配置更新
+            echo "=== 调试: Caddyfile 内容 ==="
             if [ -f /opt/app/Caddyfile ]; then
+              cat /opt/app/Caddyfile
+              echo "==========================="
+
               # 确保域名配置存在
               if grep -q "administrator.${{ env.DOMAIN }}" /opt/app/Caddyfile; then
                 sed -i "/administrator\.${{ env.DOMAIN }}/,/}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|" /opt/app/Caddyfile
               else
                 cat >> /opt/app/Caddyfile << 'EOF'
 
-            administrator.${{ env.DOMAIN }} {
-                reverse_proxy agent-control-plane_app:3000
-            }
-            EOF
+administrator.${{ env.DOMAIN }} {
+    reverse_proxy agent-control-plane_app:3000
+}
+EOF
               fi
 
               # 确保 IP 地址访问配置存在
               if ! grep -q "^:80 {" /opt/app/Caddyfile; then
                 cat >> /opt/app/Caddyfile << 'EOF'
 
-            :80 {
-                reverse_proxy agent-control-plane_app:3000
-            }
-            EOF
+:80 {
+    reverse_proxy agent-control-plane_app:3000
+}
+EOF
               else
                 # 更新已有的 :80 块中的 reverse_proxy 目标
                 sed -i '/^:80 {/,/^}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|' /opt/app/Caddyfile
               fi
+
+              echo "=== 更新后的 Caddyfile ==="
+              cat /opt/app/Caddyfile
+              echo "==========================="
+
+              # 检查 Caddy 容器是否正确挂载了 Caddyfile
+              echo "=== Caddy 容器挂载信息 ==="
+              docker inspect caddy --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null || echo "caddy container not found"
 
               docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
               echo "Caddy 配置已更新"
