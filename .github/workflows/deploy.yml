@@ -249,23 +249,8 @@ jobs:
             echo ""
             echo "=== [7/9] Caddyfile 配置 ==="
 
-            # 生成主 Caddyfile
-            cat > /opt/app/Caddyfile << 'CADDY_EOF'
-# 控制平面
-administrator.chmjk67.top {
-    reverse_proxy agent-control-plane_app:3000
-}
-
-# Grafana 监控
-grafana.chmjk67.top {
-    reverse_proxy acp-grafana:3000
-}
-
-# 默认回退
-:80 {
-    reverse_proxy agent-control-plane_app:3000
-}
-CADDY_EOF
+            # 生成主 Caddyfile（使用 printf 避免 heredoc 问题）
+            printf '%s\n' '# 控制平面' 'administrator.chmjk67.top {' '    reverse_proxy agent-control-plane_app:3000' '}' '' '# Grafana 监控' 'grafana.chmjk67.top {' '    reverse_proxy acp-grafana:3000' '}' '' '# 默认回退' ':80 {' '    reverse_proxy agent-control-plane_app:3000' '}' > /opt/app/Caddyfile
 
             # 同步 Agent 路由（从 caddy-agents 目录）
             if [ -d /opt/app/caddy-agents ]; then
