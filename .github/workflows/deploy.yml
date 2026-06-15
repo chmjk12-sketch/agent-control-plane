@@ -137,10 +137,20 @@ jobs:
           out = run_cmd(deploy_cmd, 60)
           print(out)
 
-          # Step 6: 数据库迁移
+          # Step 6: 数据库迁移 (通过 psql 直接执行 SQL，不依赖 Prisma CLI)
           print("=== [6/8] 数据库迁移 ===")
           time.sleep(10)
-          out = run_cmd('docker exec agent-control-plane_app node_modules/.bin/prisma migrate deploy 2>&1 || echo "MIGRATE_SKIPPED"', 120)
+          with open('prisma/migrations/20240614000000_v2_full_schema/migration.sql', 'r') as f:
+              migrate_sql = f.read()
+          migrate_b64 = base64.b64encode(migrate_sql.encode()).decode()
+          migrate_cmd = (
+              'TABLES=$(docker exec cp-postgres psql -U cp_admin -d agent_control_plane -tAc '
+              '"SELECT count(*) FROM information_schema.tables WHERE table_schema=$$public$$ AND table_name=$$Agent$$" 2>/dev/null); '
+              'if [ "$TABLES" -gt 0 ] 2>/dev/null; then echo "TABLES_EXIST"; '
+              'else echo "' + migrate_b64 + '" | base64 -d > /tmp/migrate.sql && '
+              'cat /tmp/migrate.sql | docker exec -i cp-postgres psql -U cp_admin -d agent_control_plane 2>&1 && echo "MIGRATE_OK"; fi'
+          )
+          out = run_cmd(migrate_cmd, 120)
           print(out)
 
           # Step 6.5: 检查容器状态和日志
