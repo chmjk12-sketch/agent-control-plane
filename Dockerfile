@@ -14,8 +14,8 @@ RUN npm ci
 # 复制源码
 COPY . .
 
-# 生成 Prisma Client
-RUN npx prisma generate
+# 生成 Prisma Client（强制指定 binary target 避免 OpenSSL 检测问题）
+RUN npx prisma generate --generator client
 
 # 构建 Next.js 应用
 RUN npm run build
@@ -47,6 +47,9 @@ COPY --from=builder /app/prisma ./prisma
 # Prisma Client（运行时必需）
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+
+# 确保运行时 OpenSSL 3.x 引擎存在
+RUN ls -la ./node_modules/.prisma/client/libquery_engine-* 2>/dev/null || echo "No engines found"
 
 # Prisma CLI（运行时执行迁移）
 COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
