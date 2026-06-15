@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Builder
 # ============================================================
-FROM node:22-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
 LABEL maintainer="agent-control-plane"
 
@@ -23,7 +23,7 @@ RUN npm run build
 # ============================================================
 # Stage 2: Runner (production)
 # ============================================================
-FROM node:22-slim AS runner
+FROM node:22-bookworm-slim AS runner
 
 LABEL maintainer="agent-control-plane"
 LABEL description="Agent Control Plane - 生产运行镜像"
