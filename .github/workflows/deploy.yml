@@ -148,7 +148,8 @@ jobs:
             echo ""
             echo "=== [5/7] 部署容器 ==="
             docker stop agent-control-plane_app 2>/dev/null || true
-            docker rm agent-control-plane_app 2>/dev/null || true
+            docker rm -f agent-control-plane_app 2>/dev/null || true
+            sleep 2
             docker run -d --name agent-control-plane_app \
               -p 3000:3000 \
               --restart always \
