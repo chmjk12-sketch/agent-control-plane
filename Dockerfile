@@ -56,9 +56,12 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # 确保运行时 OpenSSL 3.x 引擎存在
 RUN ls -la ./node_modules/.prisma/client/libquery_engine-* 2>/dev/null || echo "No engines found"
 
-# Prisma CLI（运行时执行迁移）
+# Prisma CLI（运行时执行迁移）- 复制完整依赖树
 COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma/internals ./node_modules/@prisma/internals 2>/dev/null || true
+COPY --from=builder /app/node_modules/@prisma/migrate ./node_modules/@prisma/migrate 2>/dev/null || true
+COPY --from=builder /app/node_modules/@prisma/engines ./node_modules/@prisma/engines 2>/dev/null || true
 
 # 静态资源
 COPY --from=builder /app/public ./public
