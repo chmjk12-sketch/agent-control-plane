@@ -94,6 +94,12 @@ jobs:
             echo "  Deploying: $IMAGE"
             echo "========================================"
 
+            # --- [0/7] 检查现有容器 ---
+            echo ""
+            echo "=== [0/7] 现有容器检查 ==="
+            docker ps --format "{{.Names}}\t{{.Ports}}\t{{.Status}}" | sort
+            echo "==========================="
+
             # --- [1/7] Docker 网络 ---
             echo ""
             echo "=== [1/7] Docker 网络 ==="
