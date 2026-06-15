@@ -140,7 +140,7 @@ jobs:
           # Step 6: 数据库迁移
           print("=== [6/8] 数据库迁移 ===")
           time.sleep(10)
-          out = run_cmd('docker exec agent-control-plane_app npx prisma migrate deploy 2>&1 || echo "MIGRATE_SKIPPED"', 120)
+          out = run_cmd('docker exec agent-control-plane_app node_modules/.bin/prisma migrate deploy 2>&1 || echo "MIGRATE_SKIPPED"', 120)
           print(out)
 
           # Step 6.5: 检查容器状态和日志
