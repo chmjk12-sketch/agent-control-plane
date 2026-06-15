@@ -211,6 +211,9 @@ jobs:
               echo "Caddy reload failed, restarting container..."
               docker restart caddy 2>/dev/null || echo "Caddy restart failed"
             }
+            # 强制重启 Caddy 确保配置生效
+            docker restart caddy 2>/dev/null || echo "Caddy not running, will use new config on next start"
+            sleep 3
             echo "Caddy 配置已更新"
 
             echo ""
