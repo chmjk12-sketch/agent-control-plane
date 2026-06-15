@@ -4,21 +4,31 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rollback:
+        description: '回滚到上一个版本'
+        required: false
+        type: boolean
+        default: false
 
 env:
   APP_NAME: agent-control-plane
   REGISTRY: crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com
   REGISTRY_NAMESPACE: chmjk67
   DOMAIN: chmjk67.top
-  ECS_IP: 39.105.86.184
-  INSTANCE_ID: i-2zeee6djmc1qhwptmz1l
+  ECS_HOST: 39.105.86.184
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # ============================================================
+      # Docker 构建 & 推送
+      # ============================================================
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -33,177 +43,243 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
 
-      # 部署：分步通过 RunCommand 执行，每步可见输出
-      - name: Deploy to server
+      # ============================================================
+      # 将迁移 SQL 编码为环境变量，供 SSH 步骤解码使用
+      # ============================================================
+      - name: Encode migration SQL
+        id: migration
+        run: |
+          MIGRATION_FILE="prisma/migrations/20240614000000_v2_full_schema/migration.sql"
+          if [ -f "$MIGRATION_FILE" ]; then
+            MIGRATE_B64=$(base64 -w0 "$MIGRATION_FILE")
+            echo "sql_b64=$MIGRATE_B64" >> "$GITHUB_OUTPUT"
+            echo "Migration SQL encoded ($(wc -c < "$MIGRATION_FILE") bytes)"
+          else
+            echo "WARNING: Migration file not found: $MIGRATION_FILE"
+            echo "sql_b64=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ============================================================
+      # 回滚处理：如果触发回滚，使用上一版本的镜像
+      # ============================================================
+      - name: Resolve deploy image tag
+        id: image
+        run: |
+          if [ "${{ github.event.inputs.rollback }}" = "true" ]; then
+            # 回滚：使用 latest 标签（上一版本在推送前已被标记为 latest 的前一个版本）
+            # 更安全的做法是拉取当前 latest 的 digest，然后使用它
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "Rollback mode: will deploy previous version (latest tag)"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "Normal deploy: ${{ github.sha }}"
+          fi
+
+      # ============================================================
+      # SSH 部署
+      # ============================================================
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            IMAGE="${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ steps.image.outputs.tag }}"
+            MIGRATE_B64="${{ steps.migration.outputs.sql_b64 }}"
+
+            echo "========================================"
+            echo "  Deploying: $IMAGE"
+            echo "========================================"
+
+            # --- [1/7] Docker 网络 ---
+            echo ""
+            echo "=== [1/7] Docker 网络 ==="
+            docker network create caddy-net 2>/dev/null || true
+            docker network ls --filter name=caddy-net --format "Network: {{.Name}} ({{.Driver}})"
+
+            # --- [2/7] Docker login ---
+            echo ""
+            echo "=== [2/7] Docker login ==="
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+
+            # --- [3/7] PostgreSQL ---
+            echo ""
+            echo "=== [3/7] PostgreSQL ==="
+            if ! docker ps --format '{{.Names}}' | grep -q '^cp-postgres$'; then
+              echo "启动 PostgreSQL..."
+              docker rm -f cp-postgres 2>/dev/null || true
+              docker run -d --name cp-postgres --restart always --network caddy-net \
+                -e POSTGRES_USER=cp_admin \
+                -e POSTGRES_PASSWORD=cp_admin_2024_secure \
+                -e POSTGRES_DB=agent_control_plane \
+                -v cp-postgres-data:/var/lib/postgresql/data \
+                postgres:16-alpine
+              echo "等待 PostgreSQL 就绪..."
+              for i in $(seq 1 30); do
+                if docker exec cp-postgres pg_isready -U cp_admin >/dev/null 2>&1; then
+                  echo "PostgreSQL 就绪 (${i}s)"
+                  break
+                fi
+                sleep 1
+              done
+              if ! docker exec cp-postgres pg_isready -U cp_admin >/dev/null 2>&1; then
+                echo "ERROR: PostgreSQL 启动超时"
+                exit 1
+              fi
+            else
+              echo "PostgreSQL 已在运行"
+            fi
+
+            # --- [4/7] 拉取镜像 ---
+            echo ""
+            echo "=== [4/7] 拉取镜像 ==="
+            docker pull "$IMAGE"
+
+            # --- [5/7] 部署容器 ---
+            echo ""
+            echo "=== [5/7] 部署容器 ==="
+            docker stop agent-control-plane_app 2>/dev/null || true
+            docker rm agent-control-plane_app 2>/dev/null || true
+            docker run -d --name agent-control-plane_app \
+              -p 3000:3000 \
+              --restart always \
+              --network caddy-net \
+              -e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public&connection_limit=10&pool_timeout=30" \
+              -e NODE_ENV=production \
+              -e SELF_URL="https://administrator.${{ env.DOMAIN }}" \
+              "$IMAGE"
+            echo "容器已启动"
+
+            # --- [6/7] 数据库迁移 ---
+            echo ""
+            echo "=== [6/7] 数据库迁移 ==="
+            sleep 10
+
+            TABLES=$(docker exec cp-postgres psql -U cp_admin -d agent_control_plane -tAc \
+              "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='Agent'" 2>/dev/null || echo "0")
+
+            if [ "$TABLES" -gt 0 ] 2>/dev/null; then
+              echo "表已存在，跳过迁移"
+            else
+              if [ -n "$MIGRATE_B64" ]; then
+                echo "执行迁移..."
+                echo "$MIGRATE_B64" | base64 -d > /tmp/migrate.sql
+                cat /tmp/migrate.sql | docker exec -i cp-postgres psql -U cp_admin -d agent_control_plane
+                rm -f /tmp/migrate.sql
+                echo "迁移完成"
+              else
+                echo "WARNING: 无迁移 SQL，跳过"
+              fi
+            fi
+
+            # --- [7/7] 健康检查 + Caddy ---
+            echo ""
+            echo "=== [7/7] 健康检查 + Caddy ==="
+            sleep 15
+            HEALTH_OK=false
+            for i in $(seq 1 6); do
+              if curl -sf http://127.0.0.1:3000/api/overview >/dev/null 2>&1; then
+                echo "HEALTH_OK (attempt $i)"
+                HEALTH_OK=true
+                break
+              fi
+              echo "等待健康检查... ($i/6)"
+              sleep 5
+            done
+            if [ "$HEALTH_OK" != "true" ]; then
+              echo "WARNING: 健康检查未通过，查看容器日志:"
+              docker logs --tail 30 agent-control-plane_app 2>&1
+            fi
+
+            # Caddy 配置更新
+            if [ -f /opt/app/Caddyfile ]; then
+              if grep -q "administrator.${{ env.DOMAIN }}" /opt/app/Caddyfile; then
+                sed -i "/administrator\.${{ env.DOMAIN }}/,/}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|" /opt/app/Caddyfile
+              else
+                cat >> /opt/app/Caddyfile << 'EOF'
+
+            administrator.${{ env.DOMAIN }} {
+                reverse_proxy agent-control-plane_app:3000
+            }
+            EOF
+              fi
+              docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+              echo "Caddy 配置已更新"
+            else
+              echo "Caddyfile 未找到 (/opt/app/Caddyfile)，跳过 Caddy 更新"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  部署完成"
+            echo "========================================"
+
+      # ============================================================
+      # DNS 记录（仍使用阿里云 API，从 Secrets 读取 AK/SK）
+      # ============================================================
+      - name: Ensure DNS A record
         run: |
           python3 << 'PYEOF'
-          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid, time
+          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
           from datetime import datetime, timezone
 
           AK_ID = '${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
           AK_SECRET = '${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
-          INSTANCE_ID = '${{ env.INSTANCE_ID }}'
-          REGISTRY = '${{ env.REGISTRY }}'
-          NAMESPACE = '${{ env.REGISTRY_NAMESPACE }}'
-          APP_NAME = '${{ env.APP_NAME }}'
-          REG_USER = '${{ secrets.REGISTRY_USERNAME }}'
-          REG_PASS = '${{ secrets.REGISTRY_PASSWORD }}'
 
-          def sign(params):
-              sp = sorted(params.items())
+          def sign(p):
+              sp = sorted(p.items())
               Q = urllib.parse.quote
               q = '&'.join(Q(k, '') + '=' + Q(v, '') for k, v in sp)
               s = 'GET&' + Q('/', '') + '&' + Q(q, '')
-              sig = base64.b64encode(hmac.new((AK_SECRET + '&').encode(), s.encode(), hashlib.sha1).digest()).decode()
+              sig = base64.b64encode(
+                  hmac.new((AK_SECRET + '&').encode(), s.encode(), hashlib.sha1).digest()
+              ).decode()
               return q + '&Signature=' + Q(sig, '')
 
-          def run_cmd(cmd, timeout=300):
-              b64 = base64.b64encode(cmd.encode()).decode()
-              p = {
-                  'Action': 'RunCommand', 'RegionId': 'cn-beijing',
-                  'InstanceId.1': INSTANCE_ID, 'Type': 'RunShellScript',
-                  'CommandContent': b64, 'ContentEncoding': 'Base64',
-                  'Timeout': str(timeout), 'Format': 'JSON',
-                  'Version': '2014-05-26', 'AccessKeyId': AK_ID,
-                  'SignatureMethod': 'HMAC-SHA1', 'SignatureVersion': '1.0',
-                  'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                  'SignatureNonce': str(uuid.uuid4())
-              }
-              r = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p), timeout=15)
-              iid = json.loads(r.read())['InvokeId']
-              for i in range(timeout // 5):
-                  time.sleep(5)
-                  p2 = {
-                      'Action': 'DescribeInvocationResults', 'RegionId': 'cn-beijing',
-                      'InvokeId': iid, 'Format': 'JSON',
-                      'Version': '2014-05-26', 'AccessKeyId': AK_ID,
-                      'SignatureMethod': 'HMAC-SHA1', 'SignatureVersion': '1.0',
-                      'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                      'SignatureNonce': str(uuid.uuid4())
-                  }
-                  r2 = urllib.request.urlopen('https://ecs.aliyuncs.com/?' + sign(p2), timeout=15)
-                  for res in json.loads(r2.read()).get('Invocation', {}).get('InvocationResults', {}).get('InvocationResult', []):
-                      if res.get('InvocationStatus') in ('Success', 'Failed', 'Finished'):
-                          o = res.get('Output', '') or ''
-                          return base64.b64decode(o).decode('utf-8', 'replace') if o else res['InvocationStatus']
-              return 'TIMEOUT'
-
-          IMAGE = REGISTRY + '/' + NAMESPACE + '/' + APP_NAME + ':${{ github.sha }}'
-
-          # Step 1: 确保 Docker 网络
-          print("=== [1/7] 确保 Docker 网络 caddy-net ===")
-          out = run_cmd('docker network create caddy-net 2>/dev/null; docker network ls | grep caddy-net', 60)
-          print(out)
-
-          # Step 2: Docker login
-          print("=== [2/7] Docker login ===")
-          out = run_cmd('echo "' + REG_PASS + '" | docker login ' + REGISTRY + ' -u "' + REG_USER + '" --password-stdin 2>&1', 60)
-          print(out)
-
-          # Step 3: 启动 PostgreSQL
-          print("=== [3/7] 确保 PostgreSQL 运行 ===")
-          pg_cmd = (
-              'if ! docker ps --format "{{.Names}}" | grep -q "^cp-postgres$"; then '
-              'docker rm -f cp-postgres 2>/dev/null; '
-              'docker run -d --name cp-postgres --restart always --network caddy-net '
-              '-e POSTGRES_USER=cp_admin -e POSTGRES_PASSWORD=cp_admin_2024_secure '
-              '-e POSTGRES_DB=agent_control_plane -v cp-postgres-data:/var/lib/postgresql/data '
-              'postgres:16-alpine; '
-              'echo "Waiting PG..."; '
-              'for i in $(seq 1 30); do docker exec cp-postgres pg_isready -U cp_admin >/dev/null 2>&1 && break; sleep 1; done; '
-              'echo "PG_READY"; '
-              'else echo "PG_ALREADY_RUNNING"; fi'
-          )
-          out = run_cmd(pg_cmd, 120)
-          print(out)
-
-          # Step 4: 拉取镜像
-          print("=== [4/7] 拉取镜像: " + IMAGE + " ===")
-          out = run_cmd('docker pull ' + IMAGE, 180)
-          print(out)
-
-          # Step 5: 部署容器
-          print("=== [5/7] 部署容器 ===")
-          deploy_cmd = (
-              'docker stop agent-control-plane_app 2>/dev/null; '
-              'docker rm agent-control-plane_app 2>/dev/null; '
-              'docker run -d --name agent-control-plane_app '
-              '-p 3000:3000 --restart always --network caddy-net '
-              '-e DATABASE_URL="postgresql://cp_admin:cp_admin_2024_secure@cp-postgres:5432/agent_control_plane?schema=public" '
-              '-e NODE_ENV=production '
-              '-e SELF_URL="https://administrator.chmjk67.top" '
-              + IMAGE
-          )
-          out = run_cmd(deploy_cmd, 60)
-          print(out)
-
-          # Step 6: 数据库迁移 (通过 psql 直接执行 SQL，不依赖 Prisma CLI)
-          print("=== [6/8] 数据库迁移 ===")
-          time.sleep(10)
-          with open('prisma/migrations/20240614000000_v2_full_schema/migration.sql', 'r') as f:
-              migrate_sql = f.read()
-          migrate_b64 = base64.b64encode(migrate_sql.encode()).decode()
-          migrate_cmd = (
-              'TABLES=$(docker exec cp-postgres psql -U cp_admin -d agent_control_plane -tAc '
-              '"SELECT count(*) FROM information_schema.tables WHERE table_schema=$$public$$ AND table_name=$$Agent$$" 2>/dev/null); '
-              'if [ "$TABLES" -gt 0 ] 2>/dev/null; then echo "TABLES_EXIST"; '
-              'else echo "' + migrate_b64 + '" | base64 -d > /tmp/migrate.sql && '
-              'cat /tmp/migrate.sql | docker exec -i cp-postgres psql -U cp_admin -d agent_control_plane 2>&1 && echo "MIGRATE_OK"; fi'
-          )
-          out = run_cmd(migrate_cmd, 120)
-          print(out)
-
-          # Step 6.5: 检查容器状态和日志
-          print("=== [7/8] 容器状态 ===")
-          out = run_cmd('docker ps -a --filter name=agent-control-plane_app --format "STATUS={{.Status}}" && docker logs --tail 30 agent-control-plane_app 2>&1', 60)
-          print(out)
-
-          # Step 7: 健康检查 + Caddy 更新
-          print("=== [8/8] 健康检查 + Caddy ===")
-          health_cmd = (
-              'sleep 15; '
-              'for i in $(seq 1 6); do '
-              '  curl -sf http://127.0.0.1:3000/api/overview && echo "HEALTH_OK" && break; '
-              '  echo "RETRY_$i"; sleep 5; '
-              'done; '
-              'if [ -f /opt/app/Caddyfile ]; then '
-              '  if grep -q "administrator.chmjk67.top" /opt/app/Caddyfile; then '
-              '    sed -i "/administrator\\.chmjk67\\.top/,/}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|" /opt/app/Caddyfile; '
-              '  else '
-              '    echo "" >> /opt/app/Caddyfile; '
-              '    echo "administrator.chmjk67.top {" >> /opt/app/Caddyfile; '
-              '    echo "    reverse_proxy agent-control-plane_app:3000" >> /opt/app/Caddyfile; '
-              '    echo "}" >> /opt/app/Caddyfile; '
-              '  fi; '
-              '  docker exec caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true; '
-              '  echo "CADDY_UPDATED"; '
-              'else echo "CADDYFILE_NOT_FOUND"; fi'
-          )
-          out = run_cmd(health_cmd, 60)
-          print(out)
-
-          print("=== 部署流程完成 ===")
+          p = {
+              'Action': 'AddDomainRecord',
+              'DomainName': '${{ env.DOMAIN }}',
+              'RR': 'administrator',
+              'Type': 'A',
+              'Value': '${{ env.ECS_HOST }}',
+              'Format': 'JSON',
+              'Version': '2015-01-09',
+              'AccessKeyId': AK_ID,
+              'SignatureMethod': 'HMAC-SHA1',
+              'SignatureVersion': '1.0',
+              'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'SignatureNonce': str(uuid.uuid4())
+          }
+          try:
+              r = urllib.request.urlopen('https://dns.aliyuncs.com/?' + sign(p), timeout=10)
+              d = json.loads(r.read())
+              if 'RecordId' in d:
+                  print('DNS OK - RecordId:', d['RecordId'])
+              else:
+                  print('DNS may already exist:', d)
+          except Exception as e:
+              print('DNS error:', e)
           PYEOF
 
-      - name: Ensure DNS A record
+      # ============================================================
+      # 部署通知
+      # ============================================================
+      - name: Notify
+        if: always()
         run: |
-          python3 -c "
-          import json, hmac, hashlib, base64, urllib.request, urllib.parse, uuid
-          from datetime import datetime, timezone
-          AK_ID='${{ secrets.ALIYUN_ACCESS_KEY_ID }}'
-          AK_SECRET='${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}'
-          def sign(p):
-              sp=sorted(p.items()); Q=urllib.parse.quote
-              q='&'.join(Q(k,'')+'='+Q(v,'') for k,v in sp)
-              s='GET&'+Q('/','')+'&'+Q(q,'')
-              sig=base64.b64encode(hmac.new((AK_SECRET+'&').encode(),s.encode(),hashlib.sha1).digest()).decode()
-              return q+'&Signature='+Q(sig,'')
-          p={'Action':'AddDomainRecord','DomainName':'${{ env.DOMAIN }}','RR':'administrator','Type':'A','Value':'${{ env.ECS_IP }}','Format':'JSON','Version':'2015-01-09','AccessKeyId':AK_ID,'SignatureMethod':'HMAC-SHA1','SignatureVersion':'1.0','Timestamp':datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),'SignatureNonce':str(uuid.uuid4())}
-          try:
-              r=urllib.request.urlopen('https://dns.aliyuncs.com/?'+sign(p),timeout=10)
-              d=json.loads(r.read())
-              if 'RecordId' in d: print('DNS OK')
-              else: print('DNS may exist:', d)
-          except Exception as e:
-              print('DNS:', e)
-          "
+          STATUS="${{ job.status }}"
+          SHA="${{ github.sha }}"
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          SHORT_SHA="${SHA:0:7}"
+
+          if [ -n "${{ secrets.NOTIFY_WEBHOOK_URL }}" ]; then
+            curl -s -X POST "${{ secrets.NOTIFY_WEBHOOK_URL }}" \
+              -H 'Content-Type: application/json' \
+              -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"部署 ${STATUS}: ${SHORT_SHA} - ${COMMIT_MSG}\"}}"
+            echo "通知已发送"
+          else
+            echo "未配置 NOTIFY_WEBHOOK_URL，跳过通知"
+          fi

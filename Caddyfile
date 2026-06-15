@@ -1,0 +1,3 @@
+administrator.chmjk67.top {
+	reverse_proxy app:3000
+}
