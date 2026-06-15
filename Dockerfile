@@ -7,6 +7,11 @@ LABEL maintainer="agent-control-plane"
 
 WORKDIR /app
 
+# 安装 OpenSSL（Prisma 生成时需要检测）
+RUN apt-get update -y && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
+
 # 依赖安装（利用 Docker 缓存层）
 COPY package*.json ./
 RUN npm ci
@@ -14,8 +19,8 @@ RUN npm ci
 # 复制源码
 COPY . .
 
-# 生成 Prisma Client（强制指定 binary target 避免 OpenSSL 检测问题）
-RUN npx prisma generate --generator client
+# 生成 Prisma Client（安装 OpenSSL 后重新生成确保引擎正确）
+RUN npx prisma generate
 
 # 构建 Next.js 应用
 RUN npm run build
