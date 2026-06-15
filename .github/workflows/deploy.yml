@@ -138,16 +138,24 @@ jobs:
           print(out)
 
           # Step 6: 数据库迁移
-          print("=== [6/7] 数据库迁移 ===")
+          print("=== [6/8] 数据库迁移 ===")
           time.sleep(10)
-          out = run_cmd('docker exec agent-control-plane_app npx prisma migrate deploy --skip-generate 2>&1 || echo "MIGRATE_SKIPPED"', 120)
+          out = run_cmd('docker exec agent-control-plane_app npx prisma migrate deploy 2>&1 || echo "MIGRATE_SKIPPED"', 120)
+          print(out)
+
+          # Step 6.5: 检查容器状态和日志
+          print("=== [7/8] 容器状态 ===")
+          out = run_cmd('docker ps -a --filter name=agent-control-plane_app --format "STATUS={{.Status}}" && docker logs --tail 30 agent-control-plane_app 2>&1', 60)
           print(out)
 
           # Step 7: 健康检查 + Caddy 更新
-          print("=== [7/7] 健康检查 + Caddy ===")
+          print("=== [8/8] 健康检查 + Caddy ===")
           health_cmd = (
-              'sleep 5; '
-              'curl -sf http://127.0.0.1:3000/api/overview && echo "HEALTH_OK" || echo "HEALTH_FAIL"; '
+              'sleep 15; '
+              'for i in $(seq 1 6); do '
+              '  curl -sf http://127.0.0.1:3000/api/overview && echo "HEALTH_OK" && break; '
+              '  echo "RETRY_$i"; sleep 5; '
+              'done; '
               'if [ -f /opt/app/Caddyfile ]; then '
               '  if grep -q "administrator.chmjk67.top" /opt/app/Caddyfile; then '
               '    sed -i "/administrator\\.chmjk67\\.top/,/}/ s|reverse_proxy .*|reverse_proxy agent-control-plane_app:3000|" /opt/app/Caddyfile; '
